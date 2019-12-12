@@ -15,6 +15,7 @@
 //! [swarm testing]: https://www.cs.utah.edu/~regehr/papers/swarm12.pdf
 
 use arbitrary::{Arbitrary, Unstructured};
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 struct Swarm {
@@ -43,7 +44,7 @@ impl Arbitrary for Swarm {
 }
 
 /// A call to one of Wasmtime's public APIs.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[allow(missing_docs)]
 pub enum ApiCall {
     ConfigNew,
@@ -57,6 +58,15 @@ pub enum ApiCall {
     CallExportedFunc { instance: usize, nth: usize },
 }
 use ApiCall::*;
+
+impl Arbitrary for ApiCall {
+    fn arbitrary<U>(_: &mut U) -> Result<Self, U::Error>
+    where
+        U: Unstructured + ?Sized,
+    {
+        unimplemented!()
+    }
+}
 
 #[derive(Default)]
 struct Scope {
@@ -74,7 +84,7 @@ impl Scope {
 }
 
 /// A sequence of API calls.
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ApiCalls {
     /// The API calls.
     pub calls: Vec<ApiCall>,
@@ -147,6 +157,10 @@ impl Arbitrary for ApiCalls {
         }
 
         Ok(ApiCalls { calls })
+    }
+
+    fn shrink(&self) -> Box<dyn Iterator<Item = Self>> {
+        Box::new(self.calls.shrink().map(|calls| ApiCalls { calls }))
     }
 }
 

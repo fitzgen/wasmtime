@@ -11,10 +11,11 @@
 pub mod api;
 
 use arbitrary::{Arbitrary, Unstructured};
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// A Wasm test case generator that is powered by Binaryen's `wasm-opt -ttf`.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct WasmOptTtf {
     /// The raw, encoded Wasm bytes.
     pub wasm: Vec<u8>,

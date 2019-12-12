@@ -48,6 +48,14 @@ pub fn instantiate(wasm: &[u8], compilation_strategy: CompilationStrategy) {
 
     let imports = {
         let module = module.borrow();
+        if module
+            .imports()
+            .iter()
+            .find(|imp| imp.name() == "log-i32")
+            .is_some()
+        {
+            panic!("TODO FITZGEN")
+        }
         match dummy_imports(&store, module.imports()) {
             Ok(imps) => imps,
             Err(_) => {
