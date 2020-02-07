@@ -7,7 +7,8 @@ use cranelift_codegen::isa::TargetFrontendConfig;
 use cranelift_entity::PrimaryMap;
 use cranelift_wasm::{
     self, translate_module, DefinedFuncIndex, FuncIndex, Global, GlobalIndex, Memory, MemoryIndex,
-    ModuleTranslationState, SignatureIndex, Table, TableIndex, TargetEnvironment, WasmResult,
+    ModuleTranslationState, PassiveDataIndex, PassiveElemIndex, SignatureIndex, Table, TableIndex,
+    TargetEnvironment, WasmError, WasmResult,
 };
 use std::convert::TryFrom;
 
@@ -324,6 +325,24 @@ impl<'data> cranelift_wasm::ModuleEnvironment<'data> for ModuleEnvironment<'data
         Ok(())
     }
 
+    fn declare_passive_element(
+        &mut self,
+        elem_index: PassiveElemIndex,
+        segments: Box<[FuncIndex]>,
+    ) -> WasmResult<()> {
+        let old = self
+            .result
+            .module
+            .passive_elements
+            .insert(elem_index, segments);
+        debug_assert!(
+            old.is_none(),
+            "should never get duplicate element indices, that would be a bug in `cranelift_wasm`'s \
+             translation"
+        );
+        Ok(())
+    }
+
     fn define_function_body(
         &mut self,
         _module_translation: &ModuleTranslationState,
@@ -360,6 +379,21 @@ impl<'data> cranelift_wasm::ModuleEnvironment<'data> for ModuleEnvironment<'data
             data,
         });
         Ok(())
+    }
+
+    fn reserve_passive_data(&mut self, count: u32) -> WasmResult<()> {
+        self.result.module.passive_elements.reserve(count as usize);
+        Ok(())
+    }
+
+    fn declare_passive_data(
+        &mut self,
+        _data_index: PassiveDataIndex,
+        _data: &'data [u8],
+    ) -> WasmResult<()> {
+        Err(WasmError::Unsupported(
+            "bulk memory: passive data".to_string(),
+        ))
     }
 
     fn declare_func_name(&mut self, func_index: FuncIndex, name: &'data str) -> WasmResult<()> {
