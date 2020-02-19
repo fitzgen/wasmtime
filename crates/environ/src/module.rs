@@ -294,6 +294,11 @@ impl Module {
         index.index() < self.imported_globals.len()
     }
 
+    /// Get the given passive element, if it exists.
+    pub fn get_passive_element(&self, index: PassiveElemIndex) -> Option<&[FuncIndex]> {
+        self.passive_elements.get(&index).map(|es| &**es)
+    }
+
     /// Computes hash of the module for the purpose of caching.
     pub fn hash_for_cache<'data, H>(
         &self,
