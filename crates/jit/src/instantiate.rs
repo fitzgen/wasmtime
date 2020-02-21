@@ -186,6 +186,7 @@ impl CompiledModule {
     /// See `InstanceHandle::new`
     pub unsafe fn instantiate(
         &self,
+        is_bulk_memory: bool,
         resolver: &mut dyn Resolver,
     ) -> Result<InstanceHandle, InstantiationError> {
         let data_initializers = self
@@ -205,6 +206,7 @@ impl CompiledModule {
             &data_initializers,
             self.signatures.clone(),
             self.dbg_jit_registration.as_ref().map(|r| Rc::clone(&r)),
+            is_bulk_memory,
             Box::new(()),
         )
     }
@@ -258,7 +260,9 @@ pub unsafe fn instantiate(
     data: &[u8],
     resolver: &mut dyn Resolver,
     debug_info: bool,
+    is_bulk_memory: bool,
 ) -> Result<InstanceHandle, SetupError> {
-    let instance = CompiledModule::new(compiler, data, debug_info)?.instantiate(resolver)?;
+    let instance =
+        CompiledModule::new(compiler, data, debug_info)?.instantiate(is_bulk_memory, resolver)?;
     Ok(instance)
 }

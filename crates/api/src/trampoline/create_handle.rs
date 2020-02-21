@@ -41,6 +41,12 @@ pub(crate) fn create_handle(
             &data_initializers,
             signatures.into_boxed_slice(),
             None,
+            store
+                .engine()
+                .config()
+                .validating_config
+                .operator_config
+                .enable_bulk_memory,
             state,
         )?)
     }
