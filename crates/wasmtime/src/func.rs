@@ -1,6 +1,6 @@
 use crate::runtime::StoreInner;
 use crate::trampoline::StoreInstanceHandle;
-use crate::{Extern, FuncType, Memory, Store, Trap, Val, ValType};
+use crate::{Extern, ExternRef, FuncType, Memory, Store, Trap, Val, ValType};
 use anyhow::{bail, ensure, Context as _, Result};
 use std::cmp::max;
 use std::fmt;
@@ -9,7 +9,7 @@ use std::panic::{self, AssertUnwindSafe};
 use std::ptr;
 use std::rc::Weak;
 use wasmtime_runtime::{raise_user_trap, ExportFunction, VMTrampoline};
-use wasmtime_runtime::{Export, InstanceHandle, VMContext, VMFunctionBody};
+use wasmtime_runtime::{Export, InstanceHandle, VMContext, VMExternRef, VMFunctionBody};
 
 /// A WebAssembly function which can be called.
 ///
@@ -195,7 +195,7 @@ macro_rules! getters {
                     let mut ret = None;
                     $(let $args = $args.into_abi();)*
                     catch_traps(export.vmctx, &instance.store, || {
-                        ret = Some(fnptr(export.vmctx, ptr::null_mut(), $($args,)*));
+                        ret = Some(fnptr(export.vmctx, ptr::null_mut(), $($args.clone(),)*));
                     })?;
 
                     Ok(ret.unwrap())
@@ -747,6 +747,12 @@ pub(crate) fn catch_traps(
     }
 }
 
+// Avoid `error[E0446]: crate-visible type `runtime::StoreInner` in public
+// interface` in `WasmTy` below.
+#[doc(hidden)]
+#[derive(Copy, Clone)]
+pub struct WeakStore<'a>(&'a Weak<StoreInner>);
+
 /// A trait implemented for types which can be arguments to closures passed to
 /// [`Func::wrap`] and friends.
 ///
@@ -755,13 +761,16 @@ pub(crate) fn catch_traps(
 /// stable over time.
 ///
 /// For more information see [`Func::wrap`]
-pub unsafe trait WasmTy: Copy {
+pub unsafe trait WasmTy: Clone {
     #[doc(hidden)]
     fn push(dst: &mut Vec<ValType>);
+
     #[doc(hidden)]
     fn matches(tys: impl Iterator<Item = ValType>) -> anyhow::Result<()>;
+
     #[doc(hidden)]
-    unsafe fn load(ptr: &mut *const u128) -> Self;
+    unsafe fn load(store: WeakStore, ptr: &mut *const u128) -> Self;
+
     #[doc(hidden)]
     unsafe fn store(abi: Self, ptr: *mut u128);
 }
@@ -772,7 +781,7 @@ unsafe impl WasmTy for () {
         Ok(())
     }
     #[inline]
-    unsafe fn load(_ptr: &mut *const u128) -> Self {}
+    unsafe fn load(_store: WeakStore, _ptr: &mut *const u128) -> Self {}
     #[inline]
     unsafe fn store(_abi: Self, _ptr: *mut u128) {}
 }
@@ -791,7 +800,7 @@ unsafe impl WasmTy for i32 {
         Ok(())
     }
     #[inline]
-    unsafe fn load(ptr: &mut *const u128) -> Self {
+    unsafe fn load(_store: WeakStore, ptr: &mut *const u128) -> Self {
         let ret = **ptr as Self;
         *ptr = (*ptr).add(1);
         return ret;
@@ -810,8 +819,8 @@ unsafe impl WasmTy for u32 {
         <i32 as WasmTy>::matches(tys)
     }
     #[inline]
-    unsafe fn load(ptr: &mut *const u128) -> Self {
-        <i32 as WasmTy>::load(ptr) as Self
+    unsafe fn load(store: WeakStore, ptr: &mut *const u128) -> Self {
+        <i32 as WasmTy>::load(store, ptr) as Self
     }
     #[inline]
     unsafe fn store(abi: Self, ptr: *mut u128) {
@@ -833,7 +842,7 @@ unsafe impl WasmTy for i64 {
         Ok(())
     }
     #[inline]
-    unsafe fn load(ptr: &mut *const u128) -> Self {
+    unsafe fn load(_store: WeakStore, ptr: &mut *const u128) -> Self {
         let ret = **ptr as Self;
         *ptr = (*ptr).add(1);
         return ret;
@@ -852,8 +861,8 @@ unsafe impl WasmTy for u64 {
         <i64 as WasmTy>::matches(tys)
     }
     #[inline]
-    unsafe fn load(ptr: &mut *const u128) -> Self {
-        <i64 as WasmTy>::load(ptr) as Self
+    unsafe fn load(store: WeakStore, ptr: &mut *const u128) -> Self {
+        <i64 as WasmTy>::load(store, ptr) as Self
     }
     #[inline]
     unsafe fn store(abi: Self, ptr: *mut u128) {
@@ -875,7 +884,7 @@ unsafe impl WasmTy for f32 {
         Ok(())
     }
     #[inline]
-    unsafe fn load(ptr: &mut *const u128) -> Self {
+    unsafe fn load(_store: WeakStore, ptr: &mut *const u128) -> Self {
         let ret = f32::from_bits(**ptr as u32);
         *ptr = (*ptr).add(1);
         return ret;
@@ -900,7 +909,7 @@ unsafe impl WasmTy for f64 {
         Ok(())
     }
     #[inline]
-    unsafe fn load(ptr: &mut *const u128) -> Self {
+    unsafe fn load(_store: WeakStore, ptr: &mut *const u128) -> Self {
         let ret = f64::from_bits(**ptr as u64);
         *ptr = (*ptr).add(1);
         return ret;
@@ -908,6 +917,50 @@ unsafe impl WasmTy for f64 {
     #[inline]
     unsafe fn store(abi: Self, ptr: *mut u128) {
         *ptr = abi.to_bits() as u128;
+    }
+}
+
+unsafe impl WasmTy for Option<ExternRef> {
+    fn push(dst: &mut Vec<ValType>) {
+        dst.push(ValType::ExternRef);
+    }
+
+    fn matches(mut tys: impl Iterator<Item = ValType>) -> anyhow::Result<()> {
+        let next = tys.next();
+        ensure!(
+            next == Some(ValType::ExternRef),
+            "Type mismatch, expected `externref`, got {:?}",
+            next
+        );
+        Ok(())
+    }
+
+    #[inline]
+    unsafe fn load(store: WeakStore, ptr: &mut *const u128) -> Self {
+        let store = Store::upgrade(store.0).unwrap();
+        let raw = ptr::read(*ptr as *const *mut u8);
+        let ret = if raw.is_null() {
+            None
+        } else {
+            Some(ExternRef {
+                inner: VMExternRef::from_raw(raw),
+                store: store.weak(),
+            })
+        };
+        *ptr = (*ptr).add(1);
+        return ret;
+    }
+
+    #[inline]
+    unsafe fn store(abi: Self, ptr: *mut u128) {
+        ptr::write(
+            ptr as *mut *mut u8,
+            if let Some(x) = abi {
+                x.inner.into_raw()
+            } else {
+                ptr::null_mut()
+            },
+        );
     }
 }
 
@@ -934,6 +987,7 @@ pub unsafe trait WasmRet {
 
 unsafe impl<T: WasmTy> WasmRet for T {
     type Abi = T;
+
     fn push(dst: &mut Vec<ValType>) {
         T::push(dst)
     }
@@ -1105,6 +1159,18 @@ macro_rules! impl_into_func {
             R: WasmRet,
         {
             fn into_func(self, store: &Store) -> Func {
+                unsafe fn read_host_state<'a, F: 'static>(
+                    vmctx: *mut VMContext
+                )-> &'a (F, Weak<StoreInner>) {
+                    debug_assert!(!vmctx.is_null());
+                    let state = (*vmctx).host_state();
+                    // Double-check ourselves in debug mode, but we control
+                    // the `Any` here so an unsafe downcast should also
+                    // work.
+                    debug_assert!(state.is::<(F, Weak<StoreInner>)>());
+                    &*(state as *const _ as *const (F, Weak<StoreInner>))
+                }
+
                 // Note that this shim's ABI must match that expected by
                 // cranelift, since cranelift is generating raw function calls
                 // directly to this function.
@@ -1119,12 +1185,7 @@ macro_rules! impl_into_func {
                     R: WasmRet,
                 {
                     let ret = {
-                        let state = (*vmctx).host_state();
-                        // Double-check ourselves in debug mode, but we control
-                        // the `Any` here so an unsafe downcast should also
-                        // work.
-                        debug_assert!(state.is::<(F, Weak<StoreInner>)>());
-                        let (func, store) = &*(state as *const _ as *const (F, Weak<StoreInner>));
+                        let (func, store) = read_host_state::<F>(vmctx);
                         panic::catch_unwind(AssertUnwindSafe(|| {
                             func(
                                 Caller { store, caller_vmctx },
@@ -1138,13 +1199,14 @@ macro_rules! impl_into_func {
                     }
                 }
 
-                unsafe extern "C" fn trampoline<$($args,)* R>(
+                unsafe extern "C" fn trampoline<F, $($args,)* R>(
                     callee_vmctx: *mut VMContext,
                     caller_vmctx: *mut VMContext,
                     ptr: *const VMFunctionBody,
                     args: *mut u128,
                 )
                 where
+                    F: 'static,
                     $($args: WasmTy,)*
                     R: WasmRet,
                 {
@@ -1157,8 +1219,10 @@ macro_rules! impl_into_func {
                         ) -> R::Abi,
                     >(ptr);
 
+                    let (_, _store) = read_host_state::<F>(callee_vmctx);
+                    let _store = WeakStore(_store);
                     let mut _next = args as *const u128;
-                    $(let $args = $args::load(&mut _next);)*
+                    $(let $args = $args::load(_store, &mut _next);)*
                     let ret = ptr(callee_vmctx, caller_vmctx, $($args),*);
                     R::store(ret, args);
                 }
@@ -1169,7 +1233,7 @@ macro_rules! impl_into_func {
                 R::push(&mut ret);
                 let ty = FuncType::new(_args.into(), ret.into());
                 let store_weak = store.weak();
-                let trampoline = trampoline::<$($args,)* R>;
+                let trampoline = trampoline::<F, $($args,)* R>;
                 let (instance, export) = unsafe {
                     crate::trampoline::generate_raw_func_export(
                         &ty,
