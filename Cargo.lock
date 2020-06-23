@@ -2413,6 +2413,7 @@ dependencies = [
  "bincode",
  "cranelift-codegen",
  "cranelift-entity",
+ "cranelift-frontend",
  "cranelift-wasm",
  "directories",
  "errno",

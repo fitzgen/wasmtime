@@ -217,6 +217,7 @@ fn ignore(testsuite: &str, testname: &str, strategy: &str) -> bool {
             | ("reference_types", "externref_id_function")
             | ("reference_types", "table_size")
             | ("reference_types", "simple_ref_is_null")
+            | ("reference_types", "table_grow")
             | ("reference_types", "table_grow_with_funcref") => {
                 // TODO(#1886): Ignore if this isn't x64, because Cranelift only
                 // supports reference types on x64.
@@ -224,7 +225,22 @@ fn ignore(testsuite: &str, testname: &str, strategy: &str) -> bool {
             }
 
             // Still working on implementing these. See #929.
-            ("reference_types", _) => return true,
+            ("reference_types", "global")
+            | ("reference_types", "linking")
+            | ("reference_types", "ref_func")
+            | ("reference_types", "ref_is_null")
+            | ("reference_types", "ref_null")
+            | ("reference_types", "table_fill")
+            // | ("reference_types", "table_set")
+                => {
+                return true;
+            }
+
+            // TODO(#1886): Ignore reference types tests if this isn't x64,
+            // because Cranelift only supports reference types on x64.
+            ("reference_types", _) => {
+                return env::var("CARGO_CFG_TARGET_ARCH").unwrap() != "x86_64";
+            }
 
             _ => {}
         },
