@@ -312,6 +312,11 @@ impl Context {
         Ok(())
     }
 
+    /// Run the souper-based peephole optimizations.
+    pub fn souper(&mut self, isa: &dyn TargetIsa) -> CodegenResult<()> {
+        todo!("jubi")
+    }
+
     /// Perform NaN canonicalizing rewrites on the function.
     pub fn canonicalize_nans(&mut self, isa: &dyn TargetIsa) -> CodegenResult<()> {
         do_nan_canonicalization(&mut self.func);

@@ -56,6 +56,7 @@ mod test_safepoint;
 mod test_shrink;
 mod test_simple_gvn;
 mod test_simple_preopt;
+mod test_souper;
 mod test_stackmaps;
 mod test_unwind;
 mod test_verifier;
@@ -140,6 +141,7 @@ fn new_subtest(parsed: &TestCommand) -> subtest::SubtestResult<Box<dyn subtest::
         "shrink" => test_shrink::subtest(parsed),
         "simple-gvn" => test_simple_gvn::subtest(parsed),
         "simple_preopt" => test_simple_preopt::subtest(parsed),
+        "souper" => test_souper::subtest(parsed),
         "stackmaps" => test_stackmaps::subtest(parsed),
         "unwind" => test_unwind::subtest(parsed),
         "verifier" => test_verifier::subtest(parsed),
