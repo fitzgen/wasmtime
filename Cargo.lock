@@ -2508,6 +2508,7 @@ dependencies = [
  "memoffset 0.6.1",
  "more-asserts",
  "psm",
+ "rayon",
  "region",
  "thiserror",
  "wasmtime-environ",

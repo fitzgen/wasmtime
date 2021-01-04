@@ -16,6 +16,7 @@ use crate::vmcontext::{
 use crate::{ExportFunction, ExportGlobal, ExportMemory, ExportTable};
 use memoffset::offset_of;
 use more_asserts::assert_lt;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::alloc::{self, Layout};
 use std::any::Any;
 use std::cell::RefCell;
@@ -1347,28 +1348,43 @@ fn initialize_memories(
     instance: &Instance,
     data_initializers: &[DataInitializer<'_>],
 ) -> Result<(), InstantiationError> {
-    for init in data_initializers {
-        let memory = instance.get_memory(init.location.memory_index);
+    let instance = UnsafeSyncInstance(instance);
 
-        let start = get_memory_init_start(init, instance);
-        if start
-            .checked_add(init.data.len())
-            .map_or(true, |end| end > memory.current_length)
-        {
-            return Err(InstantiationError::Trap(Trap::wasm(
-                ir::TrapCode::HeapOutOfBounds,
-            )));
-        }
+    // First, do all the bounds checking.
+    data_initializers
+        .par_iter()
+        .map(|seg| {
+            let memory = instance.0.get_memory(seg.location.memory_index);
 
+            let start = get_memory_init_start(seg, &instance.0);
+            if start
+                .checked_add(seg.data.len())
+                .map_or(true, |end| end > memory.current_length)
+            {
+                Err(InstantiationError::Trap(Trap::wasm(
+                    ir::TrapCode::HeapOutOfBounds,
+                )))
+            } else {
+                Ok(())
+            }
+        })
+        .collect::<Result<(), InstantiationError>>()?;
+
+    // Second, do the `memcpy`ing.
+    data_initializers.par_iter().for_each(|seg| {
+        let start = get_memory_init_start(seg, &instance.0);
         unsafe {
-            let mem_slice = get_memory_slice(init, instance);
-            let end = start + init.data.len();
+            let mem_slice = get_memory_slice(seg, &instance.0);
+            let end = start + seg.data.len();
             let to_init = &mut mem_slice[start..end];
-            to_init.copy_from_slice(init.data);
+            to_init.copy_from_slice(seg.data);
         }
-    }
+    });
 
-    Ok(())
+    return Ok(());
+
+    struct UnsafeSyncInstance<'a>(&'a Instance);
+    unsafe impl Sync for UnsafeSyncInstance<'_> {}
 }
 
 /// Allocate memory for just the globals of the current module,
