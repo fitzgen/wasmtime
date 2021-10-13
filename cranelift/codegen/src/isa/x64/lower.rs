@@ -5801,7 +5801,14 @@ fn lower_insn_to_regs<C: LowerCtx<I = Inst>>(
 
             // Now the AtomicRmwSeq (pseudo-) instruction itself
             let op = inst_common::AtomicRmwOp::from(ctx.data(insn).atomic_rmw_op().unwrap());
-            ctx.emit(Inst::AtomicRmwSeq { ty: ty_access, op });
+            ctx.emit(Inst::AtomicRmwSeq {
+                ty: ty_access,
+                op,
+                address: regs::r9(),
+                operand: regs::r10(),
+                temp: Writable::from_reg(regs::r11()),
+                dst_old: Writable::from_reg(regs::rax()),
+            });
 
             // And finally, copy the preordained AtomicRmwSeq output reg to its destination.
             ctx.emit(Inst::gen_move(dst, regs::rax(), types::I64));
@@ -5827,8 +5834,10 @@ fn lower_insn_to_regs<C: LowerCtx<I = Inst>>(
             ));
             ctx.emit(Inst::LockCmpxchg {
                 ty: ty_access,
-                src: replacement,
-                dst: addr.into(),
+                mem: addr.into(),
+                replacement,
+                expected: regs::rax(),
+                dst_old: Writable::from_reg(regs::rax()),
             });
             // And finally, copy the old value at the location to its destination reg.
             ctx.emit(Inst::gen_move(dst, regs::rax(), types::I64));

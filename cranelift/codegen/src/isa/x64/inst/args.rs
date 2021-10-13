@@ -285,6 +285,25 @@ impl PrettyPrintSized for RegMemImm {
     }
 }
 
+/// An operand which is either an 8-bit integer immediate or a register.
+#[derive(Clone, Debug)]
+pub enum Imm8Reg {
+    Imm8 { imm: u8 },
+    Reg { reg: Reg },
+}
+
+impl From<u8> for Imm8Reg {
+    fn from(imm: u8) -> Self {
+        Self::Imm8 { imm }
+    }
+}
+
+impl From<Reg> for Imm8Reg {
+    fn from(reg: Reg) -> Self {
+        Self::Reg { reg }
+    }
+}
+
 /// An operand which is either an integer Register or a value in Memory.  This can denote an 8, 16,
 /// 32, 64, or 128 bit value.
 #[derive(Clone, Debug)]
