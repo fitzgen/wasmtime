@@ -406,17 +406,27 @@ impl<'a> Codegen<'a> {
                 let termdata = &self.termenv.terms[term.index()];
                 let sig = termdata.constructor_sig(self.typeenv).unwrap();
                 assert_eq!(input_exprs.len(), sig.param_tys.len());
-                let fallible_try = if infallible { "" } else { "?" };
-                writeln!(
-                    code,
-                    "{}let {} = {}(ctx, {}){};",
-                    indent,
-                    outputname,
-                    sig.full_name,
-                    input_exprs.join(", "),
-                    fallible_try,
-                )
-                .unwrap();
+                if infallible {
+                    writeln!(
+                        code,
+                        "{}let {} = {}(ctx, {});",
+                        indent,
+                        outputname,
+                        sig.full_name,
+                        input_exprs.join(", "),
+                    )
+                    .unwrap();
+                } else {
+                    writeln!(
+                        code,
+                        "{}let {} = if let Some(val) = {}(ctx, {}) {{ val }} else {{ return None; }};",
+                        indent,
+                        outputname,
+                        sig.full_name,
+                        input_exprs.join(", "),
+                    )
+                    .unwrap();
+                }
                 self.define_val(&output, ctx, /* is_ref = */ false, termdata.ret_ty);
             }
             &ExprInst::Return {
