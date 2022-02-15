@@ -26,6 +26,8 @@
   </h3>
 </div>
 
+FITZGEN
+
 ## Installation
 
 The Wasmtime CLI can be installed on Linux and macOS with a small install
