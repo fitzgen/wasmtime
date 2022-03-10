@@ -899,7 +899,7 @@ pub unsafe fn gc(
                 });
             }
             externref_activations_table.sweep();
-            log::debug!("end GC");
+            log::debug!("end GC (no Wasm on stack)");
             return;
         }
         Some(canary) => canary,

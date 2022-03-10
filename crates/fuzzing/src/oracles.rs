@@ -554,26 +554,56 @@ pub fn spectest(mut fuzz_config: generators::Config, test: generators::SpecTest)
         .unwrap();
 }
 
+const TABLE_OPS_FUEL: u64 = 1_000;
+
 /// Execute a series of `table.get` and `table.set` operations.
 pub fn table_ops(mut fuzz_config: generators::Config, ops: generators::table_ops::TableOps) {
-    let expected_drops = Arc::new(AtomicUsize::new(ops.num_params() as usize));
+    let expected_drops = Arc::new(AtomicUsize::new(ops.num_params as usize));
     let num_dropped = Arc::new(AtomicUsize::new(0));
 
     {
+        // Ensure that, if we are using the pooling allocator, then our instance
+        // limits can instantiate a `TableOps` module.
+        if let generators::InstanceAllocationStrategy::Pooling {
+            instance_limits, ..
+        } = &mut fuzz_config.wasmtime.strategy
+        {
+            instance_limits.count = 1;
+            instance_limits.memories = 0;
+            instance_limits.tables = 1;
+            instance_limits.memory_pages = 0;
+            instance_limits.table_elements = *crate::generators::table_ops::TABLE_SIZE_RANGE.end();
+            instance_limits.size = 1 << 16;
+        }
+
+        // Ensure that the proposals used by the table-ops generator are
+        // enabled.
+        fuzz_config.module_config.config.multi_value_enabled = true;
+        fuzz_config.module_config.config.reference_types_enabled = true;
+
         fuzz_config.wasmtime.consume_fuel = true;
         let mut store = fuzz_config.to_store();
 
-        // consume the default fuel in the store ...
+        // Consume the default fuel in the store ...
         let remaining = store.consume_fuel(0).unwrap();
         store.consume_fuel(remaining - 1).unwrap();
-        // ... then add back in how much fuel we're allowing here
-        store.add_fuel(1_000).unwrap();
+        // ... then add back in how much fuel we're allowing here.
+        store.add_fuel(TABLE_OPS_FUEL - 1).unwrap();
+        assert_eq!(
+            TABLE_OPS_FUEL,
+            store.consume_fuel(0).unwrap(),
+            "should have the configured fuel"
+        );
+        log::debug!("added {} fuel to the store", TABLE_OPS_FUEL);
 
         let wasm = ops.to_wasm_binary();
         log_wasm(&wasm);
-        let module = match compile_module(store.engine(), &wasm, false, &fuzz_config) {
+        let module = match compile_module(store.engine(), &wasm, true, &fuzz_config) {
             Some(m) => m,
-            None => return,
+            None => {
+                log::info!("failed to compile table-ops module");
+                return;
+            }
         };
 
         let mut linker = Linker::new(store.engine());
@@ -600,6 +630,7 @@ pub fn table_ops(mut fuzz_config: generators::Config, ops: generators::table_ops
                         let num_dropped = num_dropped.clone();
                         let expected_drops = expected_drops.clone();
                         move |mut caller: Caller<'_, StoreLimits>, _params, results| {
+                            log::debug!("table-ops GC called");
                             if num_gcs.fetch_add(1, SeqCst) < MAX_GCS {
                                 caller.gc();
                             }
@@ -622,6 +653,7 @@ pub fn table_ops(mut fuzz_config: generators::Config, ops: generators::table_ops
             .func_wrap("", "take_refs", {
                 let expected_drops = expected_drops.clone();
                 move |a: Option<ExternRef>, b: Option<ExternRef>, c: Option<ExternRef>| {
+                    log::debug!("table-ops `take_refs` called");
                     // Do the assertion on each ref's inner data, even though it
                     // all points to the same atomic, so that if we happen to
                     // run into a use-after-free bug with one of these refs we
@@ -659,6 +691,7 @@ pub fn table_ops(mut fuzz_config: generators::Config, ops: generators::table_ops
                         let num_dropped = num_dropped.clone();
                         let expected_drops = expected_drops.clone();
                         move |_caller, _params, results| {
+                            log::debug!("table-ops `make_refs` called");
                             expected_drops.fetch_add(3, SeqCst);
                             results[0] =
                                 Some(ExternRef::new(CountDrops(num_dropped.clone()))).into();
@@ -673,18 +706,32 @@ pub fn table_ops(mut fuzz_config: generators::Config, ops: generators::table_ops
             )
             .unwrap();
 
+        log::debug!("instantiating table-ops module");
         let instance = linker.instantiate(&mut store, &module).unwrap();
+
+        log::debug!("getting table-ops instance's `run` function");
         let run = instance.get_func(&mut store, "run").unwrap();
 
-        let args: Vec<_> = (0..ops.num_params())
+        log::debug!(
+            "calling table-ops `run` function; have {} fuel",
+            store.consume_fuel(0).unwrap()
+        );
+        let args: Vec<_> = (0..ops.num_params)
             .map(|_| Val::ExternRef(Some(ExternRef::new(CountDrops(num_dropped.clone())))))
             .collect();
-        let _ = run.call(&mut store, &args, &mut []);
+        let result = run.call(&mut store, &args, &mut []);
+        log::debug!("Result of calling `run`: {:?}", result);
 
         // Do a final GC after running the Wasm.
+        log::debug!("doing final table-ops GC");
         store.gc();
     }
 
+    log::debug!(
+        "Expecting {} drops; actually found {} drops",
+        expected_drops.load(SeqCst),
+        num_dropped.load(SeqCst),
+    );
     assert_eq!(num_dropped.load(SeqCst), expected_drops.load(SeqCst));
     return;
 
