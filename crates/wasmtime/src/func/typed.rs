@@ -122,7 +122,7 @@ where
                 .externref_activations_table()
                 .bump_capacity_remaining()
         {
-            store.gc();
+            store.allocate_bump_chunk_or_gc();
         }
 
         // Validate that all runtime values flowing into this store indeed

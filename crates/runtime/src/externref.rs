@@ -589,6 +589,32 @@ impl VMExternRefActivationsTable {
         }
     }
 
+    /// Has this table internally allocated a bump chunk?
+    pub fn has_bump_chunk(&self) -> bool {
+        !self.alloc.chunk.is_empty()
+    }
+
+    /// Allocate a bump chunk for this table.
+    ///
+    /// Panics if this table already has a bump chunk.
+    pub fn allocate_bump_chunk(&mut self) {
+        log::debug!("Allocating bump chunk for `VMExternRefActivationsTable`");
+        assert!(!self.has_bump_chunk());
+        self.alloc.chunk = Self::new_chunk(Self::CHUNK_SIZE);
+        unsafe {
+            self.reset_bump_next();
+            self.alloc.end =
+                NonNull::new(self.alloc.chunk.as_mut_ptr().add(self.alloc.chunk.len())).unwrap();
+        }
+    }
+
+    /// Reset our `next` finger to the start of the bump allocation chunk.
+    unsafe fn reset_bump_next(&mut self) {
+        let next = self.alloc.chunk.as_mut_ptr();
+        debug_assert!(!next.is_null());
+        *self.alloc.next.get() = NonNull::new_unchecked(next);
+    }
+
     fn new_chunk(size: usize) -> Box<[UnsafeCell<Option<VMExternRef>>]> {
         assert!(size >= Self::CHUNK_SIZE);
         (0..size).map(|_| UnsafeCell::new(None)).collect()
@@ -735,18 +761,12 @@ impl VMExternRefActivationsTable {
 
         // If this is the first instance of gc then the initial chunk is empty,
         // so we lazily allocate space for fast bump-allocation in the future.
-        if self.alloc.chunk.is_empty() {
-            self.alloc.chunk = Self::new_chunk(Self::CHUNK_SIZE);
-            self.alloc.end =
-                NonNull::new(unsafe { self.alloc.chunk.as_mut_ptr().add(self.alloc.chunk.len()) })
-                    .unwrap();
+        if !self.has_bump_chunk() {
+            self.allocate_bump_chunk();
         }
 
-        // Reset our `next` finger to the start of the bump allocation chunk.
         unsafe {
-            let next = self.alloc.chunk.as_mut_ptr();
-            debug_assert!(!next.is_null());
-            *self.alloc.next.get() = NonNull::new_unchecked(next);
+            self.reset_bump_next();
         }
 
         // The current `precise_stack_roots` becomes our new over-appoximated

@@ -883,7 +883,7 @@ impl Func {
         params: &[Val],
         results: &mut [Val],
     ) -> Result<()> {
-        // We need to perform a dynamic check that the arguments given to us
+        // we need to perform a dynamic check that the arguments given to us
         // match the signature of this function and are appropriate to pass to
         // this function. This involves checking to make sure we have the right
         // number and types of arguments as well as making sure everything is
@@ -931,7 +931,7 @@ impl Func {
                 .externref_activations_table()
                 .bump_capacity_remaining()
         {
-            store.gc();
+            store.allocate_bump_chunk_or_gc();
         }
 
         // Store the argument values into `values_vec`.
@@ -1027,7 +1027,7 @@ impl Func {
                 .externref_activations_table()
                 .bump_capacity_remaining()
         {
-            caller.store.gc();
+            caller.store.allocate_bump_chunk_or_gc();
         }
 
         // Unlike our arguments we need to dynamically check that the return

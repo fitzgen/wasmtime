@@ -977,6 +977,10 @@ impl<'a, T> StoreContextMut<'a, T> {
         self.0.gc()
     }
 
+    pub(crate) fn allocate_bump_chunk_or_gc(&mut self) {
+        self.0.allocate_bump_chunk_or_gc()
+    }
+
     /// Returns the fuel consumed by this store.
     ///
     /// For more information see [`Store::fuel_consumed`].
@@ -1161,6 +1165,14 @@ impl StoreOpaque {
         // For this crate's API, we ensure that `set_stack_canary` invariants
         // are upheld for all host-->Wasm calls.
         unsafe { wasmtime_runtime::gc(&self.modules, &mut self.externref_activations_table) }
+    }
+
+    pub(crate) fn allocate_bump_chunk_or_gc(&mut self) {
+        if !self.externref_activations_table.has_bump_chunk() {
+            self.externref_activations_table.allocate_bump_chunk();
+        } else {
+            self.gc();
+        }
     }
 
     /// Looks up the corresponding `VMTrampoline` which can be used to enter
