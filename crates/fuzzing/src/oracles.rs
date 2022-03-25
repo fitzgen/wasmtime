@@ -247,8 +247,12 @@ fn compile_module(
     log_wasm(bytes);
     match config.compile(engine, bytes) {
         Ok(module) => Some(module),
-        Err(_) if !known_valid => None,
+        Err(e) if !known_valid => {
+            log::info!("Failed to compile module: {}", e);
+            None
+        }
         Err(e) => {
+            log::info!("Failed to compile module: {}", e);
             if let generators::InstanceAllocationStrategy::Pooling { .. } =
                 &config.wasmtime.strategy
             {
