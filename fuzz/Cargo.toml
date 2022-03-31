@@ -108,3 +108,9 @@ name = "instantiate-many"
 path = "fuzz_targets/instantiate-many.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "mutate_differential"
+path = "fuzz_targets/mutate_differential.rs"
+test = false
+doc = false

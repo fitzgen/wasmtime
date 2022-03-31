@@ -19,6 +19,15 @@ pub fn dummy_linker<'module, T>(store: &mut Store<T>, module: &Module) -> Result
     Ok(linker)
 }
 
+/// Create a set of dummy functions/globals/etc for the given imports.
+pub fn dummy_imports<'module, T>(store: &mut Store<T>, module: &Module) -> Result<Vec<Extern>> {
+    let mut result = Vec::new();
+    for import in module.imports() {
+        result.push(dummy_extern(store, import.ty())?);
+    }
+    Ok(result)
+}
+
 /// Construct a dummy `Extern` from its type signature
 pub fn dummy_extern<T>(store: &mut Store<T>, ty: ExternType) -> Result<Extern> {
     Ok(match ty {

@@ -12,6 +12,9 @@
 
 pub mod dummy;
 
+mod mutate_differential;
+pub use mutate_differential::mutate_differential;
+
 use crate::generators;
 use arbitrary::Arbitrary;
 use log::debug;
