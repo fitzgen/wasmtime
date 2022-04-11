@@ -141,3 +141,6 @@ harness = false
 [[bench]]
 name = "call"
 harness = false
+
+[patch.crates-io]
+wasm-mutate = { path = "/home/nick/wasm-tools/crates/wasm-mutate/" }

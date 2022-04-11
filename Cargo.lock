@@ -742,7 +742,7 @@ dependencies = [
  "serde",
  "smallvec",
  "target-lexicon",
- "wasmparser",
+ "wasmparser 0.83.0",
  "wasmtime-types",
  "wat",
 ]
@@ -3324,17 +3324,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasm-encoder"
+version = "0.11.0"
+dependencies = [
+ "leb128",
+]
+
+[[package]]
 name = "wasm-mutate"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88f7ccba3995e0533a62e5fa5786236e7a61e7b421a460ca68bc4c5382c7ed82"
+version = "0.2.2"
 dependencies = [
  "egg",
  "log",
  "rand 0.8.5",
  "thiserror",
- "wasm-encoder",
- "wasmparser",
+ "wasm-encoder 0.11.0",
+ "wasmparser 0.84.0",
 ]
 
 [[package]]
@@ -3347,7 +3352,7 @@ dependencies = [
  "flagset",
  "indexmap",
  "leb128",
- "wasm-encoder",
+ "wasm-encoder 0.10.0",
 ]
 
 [[package]]
@@ -3390,13 +3395,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "718ed7c55c2add6548cca3ddd6383d738cd73b892df400e96b9aa876f0141d7a"
 
 [[package]]
+name = "wasmparser"
+version = "0.84.0"
+dependencies = [
+ "indexmap",
+]
+
+[[package]]
 name = "wasmprinter"
 version = "0.2.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f973822fb3ca7e03ab421910274514b405df19a3d53acb131ae4df3a2fc4eb58"
 dependencies = [
  "anyhow",
- "wasmparser",
+ "wasmparser 0.83.0",
 ]
 
 [[package]]
@@ -3422,7 +3434,7 @@ dependencies = [
  "target-lexicon",
  "tempfile",
  "wasi-cap-std-sync",
- "wasmparser",
+ "wasmparser 0.83.0",
  "wasmtime-cache",
  "wasmtime-cranelift",
  "wasmtime-environ",
@@ -3522,7 +3534,7 @@ dependencies = [
  "test-programs",
  "tokio",
  "tracing-subscriber",
- "wasmparser",
+ "wasmparser 0.83.0",
  "wasmtime",
  "wasmtime-cache",
  "wasmtime-cranelift",
@@ -3553,7 +3565,7 @@ dependencies = [
  "object",
  "target-lexicon",
  "thiserror",
- "wasmparser",
+ "wasmparser 0.83.0",
  "wasmtime-environ",
 ]
 
@@ -3571,7 +3583,7 @@ dependencies = [
  "serde",
  "target-lexicon",
  "thiserror",
- "wasmparser",
+ "wasmparser 0.83.0",
  "wasmtime-types",
 ]
 
@@ -3613,12 +3625,12 @@ dependencies = [
  "target-lexicon",
  "tempfile",
  "v8",
- "wasm-encoder",
+ "wasm-encoder 0.10.0",
  "wasm-mutate",
  "wasm-smith",
  "wasm-spec-interpreter",
  "wasmi",
- "wasmparser",
+ "wasmparser 0.83.0",
  "wasmprinter",
  "wasmtime",
  "wasmtime-wast",
@@ -3692,7 +3704,7 @@ dependencies = [
  "cranelift-entity",
  "serde",
  "thiserror",
- "wasmparser",
+ "wasmparser 0.83.0",
 ]
 
 [[package]]
