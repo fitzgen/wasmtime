@@ -240,6 +240,7 @@ impl Instance {
     }
 
     /// Return a pointer to the interrupts structure
+    #[inline]
     pub fn runtime_limits(&self) -> *mut *const VMRuntimeLimits {
         unsafe { self.vmctx_plus_offset(self.offsets.vmctx_runtime_limits()) }
     }
