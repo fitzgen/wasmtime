@@ -1094,6 +1094,7 @@ impl<T> StoreInner<T> {
         &mut self.data
     }
 
+    #[inline]
     pub fn call_hook(&mut self, s: CallHook) -> Result<(), Trap> {
         match &mut self.call_hook {
             Some(CallHookInner::Sync(hook)) => hook(&mut self.data, s),
