@@ -63,6 +63,7 @@ impl VMHostFuncContext {
     }
 
     /// Get the host state for this host function context.
+    #[inline]
     pub fn host_state(&self) -> &(dyn Any + Send + Sync) {
         &*self.host_state
     }
