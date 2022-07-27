@@ -186,6 +186,16 @@ where
     let old_last_wasm_exit_pc = mem::replace(&mut *(**limits).last_wasm_exit_pc.get(), 0);
     let old_last_wasm_entry_sp = mem::replace(&mut *(**limits).last_wasm_entry_sp.get(), 0);
 
+    // Reset our captured entry/exit registers at the end of this function,
+    // regardless if execution is continuing via a normal return, a trap, or
+    // panic unwinding.
+    let _reset = Reset {
+        limits,
+        old_last_wasm_exit_fp,
+        old_last_wasm_exit_pc,
+        old_last_wasm_entry_sp,
+    };
+
     let result = CallThreadState::new(
         signal_handler,
         capture_backtrace,
@@ -203,15 +213,24 @@ where
         )
     });
 
-    *(**limits).last_wasm_exit_fp.get() = old_last_wasm_exit_fp;
-    *(**limits).last_wasm_exit_pc.get() = old_last_wasm_exit_pc;
-    *(**limits).last_wasm_entry_sp.get() = old_last_wasm_entry_sp;
+    return result;
 
-    return match result {
-        Ok(x) => Ok(x),
-        Err((UnwindReason::Trap(reason), backtrace)) => Err(Box::new(Trap { reason, backtrace })),
-        Err((UnwindReason::Panic(panic), _)) => std::panic::resume_unwind(panic),
-    };
+    struct Reset {
+        limits: *mut *const VMRuntimeLimits,
+        old_last_wasm_exit_fp: usize,
+        old_last_wasm_exit_pc: usize,
+        old_last_wasm_entry_sp: usize,
+    }
+
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            unsafe {
+                *(**self.limits).last_wasm_exit_fp.get() = self.old_last_wasm_exit_fp;
+                *(**self.limits).last_wasm_exit_pc.get() = self.old_last_wasm_exit_pc;
+                *(**self.limits).last_wasm_entry_sp.get() = self.old_last_wasm_entry_sp;
+            }
+        }
+    }
 
     extern "C" fn call_closure<F>(payload: *mut u8, caller: *mut VMContext)
     where
@@ -265,21 +284,23 @@ impl CallThreadState {
         }
     }
 
-    fn with(
-        self,
-        closure: impl FnOnce(&CallThreadState) -> i32,
-    ) -> Result<(), (UnwindReason, Option<Backtrace>)> {
+    fn with(self, closure: impl FnOnce(&CallThreadState) -> i32) -> Result<(), Box<Trap>> {
         let ret = tls::set(&self, || closure(&self));
         if ret != 0 {
             Ok(())
         } else {
-            Err(unsafe { self.read_unwind() })
+            Err(unsafe { self.read_trap() })
         }
     }
 
     #[cold]
-    unsafe fn read_unwind(&self) -> (UnwindReason, Option<Backtrace>) {
-        (*self.unwind.get()).as_ptr().read()
+    unsafe fn read_trap(&self) -> Box<Trap> {
+        let (unwind_reason, backtrace) = (*self.unwind.get()).as_ptr().read();
+        let reason = match unwind_reason {
+            UnwindReason::Trap(trap) => trap,
+            UnwindReason::Panic(panic) => std::panic::resume_unwind(panic),
+        };
+        Box::new(Trap { reason, backtrace })
     }
 
     fn unwind_with(&self, reason: UnwindReason) -> ! {
