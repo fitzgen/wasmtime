@@ -89,13 +89,17 @@ fn dynamic_addr(
         );
         (IntCC::UnsignedGreaterThan, index, adj_bound)
     } else {
-        // We need an overflow check for the adjusted offset.
-        let access_size_val = pos
+        // We need an overflow check for the adjusted offset. Avoid using
+        // `uadd_overflow_trap` because (a) it is marked as `can_trap(true)`
+        // which prevents GVN and LICM from cleaning up bounds checks, and (b)
+        // traps immediately rather than returning an address that will trap
+        // when accessed (the latter of which is `heap_addr`'s semantics).
+        let offset_and_size = pos
             .ins()
             .iconst(addr_ty, offset_plus_size(offset, access_size) as i64);
-        let adj_offset =
-            pos.ins()
-                .uadd_overflow_trap(index, access_size_val, ir::TrapCode::HeapOutOfBounds);
+        let (adj_offset, carry) = pos.ins().iadd_cout(index, offset_and_size);
+        let zero = pos.ins().iconst(addr_ty, 0);
+        let adj_offset = pos.ins().select(carry, zero, adj_offset);
         trace!(
             "  inserting: {}",
             pos.func.dfg.display_value_inst(adj_offset)
