@@ -103,24 +103,11 @@ fn dynamic_addr(
         (IntCC::UnsignedGreaterThan, adj_offset, bound)
     };
 
-    let spectre_oob_comparison = if isa.flags().enable_heap_access_spectre_mitigation() {
-        // When we emit a spectre-guarded heap access, we do a `select
-        // is_out_of_bounds, NULL, addr` to compute the address, and so the load
-        // will trap if the address is out of bounds, which means we don't need
-        // to do another explicit bounds check like we do below.
-        Some(SpectreOobComparison {
-            cc,
-            lhs,
-            rhs: bound,
-        })
-    } else {
-        let oob = pos.ins().icmp(cc, lhs, bound);
-        trace!("  inserting: {}", pos.func.dfg.display_value_inst(oob));
-
-        let trapnz = pos.ins().trapnz(oob, ir::TrapCode::HeapOutOfBounds);
-        trace!("  inserting: {}", pos.func.dfg.display_inst(trapnz));
-
-        None
+    let oob_comparison = OobComparison {
+        spectre: isa.flags().enable_heap_access_spectre_mitigation(),
+        cc,
+        lhs,
+        rhs: bound,
     };
 
     compute_addr(
@@ -131,7 +118,7 @@ fn dynamic_addr(
         index,
         offset,
         pos.func,
-        spectre_oob_comparison,
+        Some(oob_comparison),
     );
 }
 
@@ -202,7 +189,8 @@ fn static_addr(
         if isa.flags().enable_heap_access_spectre_mitigation() {
             let limit = pos.ins().iconst(addr_ty, limit as i64);
             trace!("  inserting: {}", pos.func.dfg.display_value_inst(limit));
-            spectre_oob_comparison = Some(SpectreOobComparison {
+            spectre_oob_comparison = Some(OobComparison {
+                spectre: true,
                 cc: IntCC::UnsignedGreaterThan,
                 lhs: index,
                 rhs: limit,
@@ -252,7 +240,8 @@ fn cast_index_to_pointer_ty(
     extended_index
 }
 
-struct SpectreOobComparison {
+struct OobComparison {
+    spectre: bool,
     cc: IntCC,
     lhs: ir::Value,
     rhs: ir::Value,
@@ -267,11 +256,9 @@ fn compute_addr(
     index: ir::Value,
     offset: u32,
     func: &mut ir::Function,
-    // If we are performing Spectre mitigation with conditional selects, the
-    // values to compare and the condition code that indicates an out-of bounds
-    // condition; on this condition, the conditional move will choose a
-    // speculatively safe address (a zero / null pointer) instead.
-    spectre_oob_comparison: Option<SpectreOobComparison>,
+    // An explicit bounds check to perform on the computed heap address. Might
+    // be a Spectre mitigation.
+    oob_comparison: Option<OobComparison>,
 ) {
     debug_assert_eq!(func.dfg.value_type(index), addr_ty);
     let mut pos = FuncCursor::new(func).at_inst(inst);
@@ -289,7 +276,13 @@ fn compute_addr(
         base
     };
 
-    if let Some(SpectreOobComparison { cc, lhs, rhs }) = spectre_oob_comparison {
+    if let Some(OobComparison {
+        spectre,
+        cc,
+        lhs,
+        rhs,
+    }) = oob_comparison
+    {
         let final_base = pos.ins().iadd(base, index);
         // NB: The addition of the offset immediate must happen *before* the
         // `select_spectre_guard`. If it happens after, then we potentially are
@@ -310,11 +303,14 @@ fn compute_addr(
         let cmp = pos.ins().icmp(cc, lhs, rhs);
         trace!("  inserting: {}", pos.func.dfg.display_value_inst(cmp));
 
-        let value = pos
-            .func
-            .dfg
-            .replace(inst)
-            .select_spectre_guard(cmp, zero, final_addr);
+        let value = if spectre {
+            pos.func
+                .dfg
+                .replace(inst)
+                .select_spectre_guard(cmp, zero, final_addr)
+        } else {
+            pos.func.dfg.replace(inst).select(cmp, zero, final_addr)
+        };
         trace!("  inserting: {}", pos.func.dfg.display_value_inst(value));
     } else if offset == 0 {
         let addr = pos.func.dfg.replace(inst).iadd(base, index);
