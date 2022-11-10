@@ -192,8 +192,10 @@ impl Context {
             log::debug!("After egraph optimization:\n{}", self.func.display());
             log::info!("egraph stats: {:?}", eg.stats);
         } else if opt_level != OptLevel::None && isa.flags().enable_alias_analysis() {
-            self.replace_redundant_loads()?;
-            self.simple_gvn(isa)?;
+            for _ in 0..2 {
+                self.replace_redundant_loads()?;
+                self.simple_gvn(isa)?;
+            }
         }
 
         Ok(())
