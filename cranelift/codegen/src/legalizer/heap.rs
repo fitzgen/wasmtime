@@ -147,18 +147,10 @@ fn static_addr(
     //
     // This first case is a trivial case where we can statically trap.
     if offset_plus_size(offset, access_size) > bound {
-        // This will simply always trap since `offset >= 0`.
-        let trap = pos.ins().trap(ir::TrapCode::HeapOutOfBounds);
-        trace!("  inserting: {}", pos.func.dfg.display_inst(trap));
+        // This access will simply always trap since `offset >= 0`. Return the
+        // `NULL` address.
         let iconst = pos.func.dfg.replace(inst).iconst(addr_ty, 0);
         trace!("  inserting: {}", pos.func.dfg.display_value_inst(iconst));
-
-        // Split the block, as the trap is a terminator instruction.
-        let curr_block = pos.current_block().expect("Cursor is not in a block");
-        let new_block = pos.func.dfg.make_block();
-        pos.insert_block(new_block);
-        cfg.recompute_block(pos.func, curr_block);
-        cfg.recompute_block(pos.func, new_block);
         return;
     }
 
