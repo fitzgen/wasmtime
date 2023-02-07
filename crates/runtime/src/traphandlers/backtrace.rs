@@ -133,7 +133,14 @@ impl Backtrace {
             None => {
                 let pc = *(*state.limits).last_wasm_exit_pc.get();
                 let fp = *(*state.limits).last_wasm_exit_fp.get();
-                assert_ne!(pc, 0);
+
+                if pc == 0 {
+                    // Host function calling another host function that
+                    // traps. No Wasm on the stack.
+                    assert_eq!(fp, 0);
+                    return;
+                }
+
                 (pc, fp)
             }
         };

@@ -349,7 +349,7 @@ impl wasmtime_environ::Compiler for Compiler {
         &self,
         ty: &WasmFuncType,
     ) -> Result<Box<dyn Any + Send>, CompileError> {
-        self.host_to_wasm_trampoline(ty)
+        self.array_call_to_wasm_call_trampoline(ty)
             .map(|x| Box::new(x) as Box<_>)
     }
 
@@ -407,35 +407,35 @@ impl wasmtime_environ::Compiler for Compiler {
         host_fn: usize,
         obj: &mut Object<'static>,
     ) -> Result<(FunctionLoc, FunctionLoc)> {
-        let host_to_wasm = self.host_to_wasm_trampoline(ty)?;
-        let wasm_to_host = self.wasm_to_host_trampoline(ty, host_fn)?;
+        let array_to_wasm = self.array_call_to_wasm_call_trampoline(ty)?;
+        let wasm_to_array = self.wasm_call_to_array_call_trampoline(ty, host_fn)?;
         let mut builder = ModuleTextBuilder::new(obj, self, self.isa.text_section_builder(2));
-        let (_, a) = builder.append_func(
-            "host_to_wasm",
-            &host_to_wasm.body,
-            host_to_wasm.alignment,
-            host_to_wasm.unwind_info.as_ref(),
-            &host_to_wasm.relocations,
+        let (_, array_to_wasm) = builder.append_func(
+            "array_to_wasm",
+            &array_to_wasm.body,
+            array_to_wasm.alignment,
+            array_to_wasm.unwind_info.as_ref(),
+            &array_to_wasm.relocations,
             |_| unreachable!(),
         );
-        let (_, b) = builder.append_func(
-            "wasm_to_host",
-            &wasm_to_host.body,
-            wasm_to_host.alignment,
-            wasm_to_host.unwind_info.as_ref(),
-            &wasm_to_host.relocations,
+        let (_, wasm_to_array) = builder.append_func(
+            "wasm_to_array",
+            &wasm_to_array.body,
+            wasm_to_array.alignment,
+            wasm_to_array.unwind_info.as_ref(),
+            &wasm_to_array.relocations,
             |_| unreachable!(),
         );
-        let a = FunctionLoc {
-            start: u32::try_from(a.start).unwrap(),
-            length: u32::try_from(a.end - a.start).unwrap(),
+        let array_to_wasm = FunctionLoc {
+            start: u32::try_from(array_to_wasm.start).unwrap(),
+            length: u32::try_from(array_to_wasm.end - array_to_wasm.start).unwrap(),
         };
-        let b = FunctionLoc {
-            start: u32::try_from(b.start).unwrap(),
-            length: u32::try_from(b.end - b.start).unwrap(),
+        let wasm_to_array = FunctionLoc {
+            start: u32::try_from(wasm_to_array.start).unwrap(),
+            length: u32::try_from(wasm_to_array.end - wasm_to_array.start).unwrap(),
         };
         builder.finish();
-        Ok((a, b))
+        Ok((array_to_wasm, wasm_to_array))
     }
 
     fn triple(&self) -> &target_lexicon::Triple {
@@ -618,7 +618,10 @@ fn compile_uncached<'a>(
 }
 
 impl Compiler {
-    fn host_to_wasm_trampoline(&self, ty: &WasmFuncType) -> Result<CompiledFunction, CompileError> {
+    fn array_call_to_wasm_call_trampoline(
+        &self,
+        ty: &WasmFuncType,
+    ) -> Result<CompiledFunction, CompileError> {
         let isa = &*self.isa;
         let value_size = mem::size_of::<u128>();
         let pointer_type = isa.pointer_type();
@@ -733,7 +736,7 @@ impl Compiler {
     /// Note that `host_fn` is an immediate which is an actual function pointer
     /// in this process. As such this compiled trampoline is not suitable for
     /// serialization.
-    fn wasm_to_host_trampoline(
+    fn wasm_call_to_array_call_trampoline(
         &self,
         ty: &WasmFuncType,
         host_fn: usize,

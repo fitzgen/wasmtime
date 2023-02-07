@@ -344,7 +344,7 @@ impl Instance {
                 let trampoline = mem::transmute::<
                     *const VMFunctionBody,
                     unsafe extern "C" fn(*mut VMOpaqueContext, *mut VMContext),
-                >(f.anyfunc.as_ref().func_ptr.as_ptr());
+                >(f.anyfunc.as_ref().native_call.as_ptr());
                 let trampoline =
                     wasmtime_runtime::prepare_host_to_wasm_trampoline(vmctx, trampoline);
                 trampoline(f.anyfunc.as_ref().vmctx, vmctx)
@@ -595,7 +595,9 @@ impl OwnedImports {
             wasmtime_runtime::Export::Function(f) => {
                 let f = f.anyfunc.as_ref();
                 self.functions.push(VMFunctionImport {
-                    body: f.func_ptr,
+                    wasm_call: f.wasm_call,
+                    native_call: f.native_call,
+                    array_call: f.array_call,
                     vmctx: f.vmctx,
                 });
             }

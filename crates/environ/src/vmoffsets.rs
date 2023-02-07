@@ -98,30 +98,44 @@ pub trait PtrSize {
     /// Returns the pointer size, in bytes, for the target.
     fn size(&self) -> u8;
 
-    /// The offset of the `func_ptr` field.
+    /// The offset of the `native_call` field.
     #[allow(clippy::erasing_op)]
     #[inline]
-    fn vmcaller_checked_func_ref_func_ptr(&self) -> u8 {
+    fn vmcaller_checked_func_ref_native_call(&self) -> u8 {
         0 * self.size()
+    }
+
+    /// The offset of the `array_call` field.
+    #[allow(clippy::erasing_op)]
+    #[inline]
+    fn vmcaller_checked_func_ref_array_call(&self) -> u8 {
+        1 * self.size()
+    }
+
+    /// The offset of the `wasm_call` field.
+    #[allow(clippy::erasing_op)]
+    #[inline]
+    fn vmcaller_checked_func_ref_wasm_call(&self) -> u8 {
+        2 * self.size()
     }
 
     /// The offset of the `type_index` field.
     #[allow(clippy::identity_op)]
     #[inline]
     fn vmcaller_checked_func_ref_type_index(&self) -> u8 {
-        1 * self.size()
+        3 * self.size()
     }
 
     /// The offset of the `vmctx` field.
     #[inline]
     fn vmcaller_checked_func_ref_vmctx(&self) -> u8 {
-        2 * self.size()
+        4 * self.size()
     }
 
     /// Return the size of `VMCallerCheckedFuncRef`.
     #[inline]
     fn size_of_vmcaller_checked_func_ref(&self) -> u8 {
-        3 * self.size()
+        5 * self.size()
     }
 
     /// Return the size of `VMGlobalDefinition`; this is the size of the largest value type (i.e. a

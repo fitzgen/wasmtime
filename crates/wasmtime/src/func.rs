@@ -900,7 +900,7 @@ impl Func {
             trampoline(
                 anyfunc.as_ref().vmctx,
                 caller,
-                anyfunc.as_ref().func_ptr.as_ptr(),
+                anyfunc.as_ref().native_call.as_ptr(),
                 params_and_returns,
             )
         })
@@ -1075,7 +1075,7 @@ impl Func {
         store: &mut StoreOpaque,
     ) -> Self {
         let anyfunc = export.anyfunc.as_ref();
-        let trampoline = store.lookup_trampoline(&*anyfunc);
+        let trampoline = anyfunc.array_call;
         Func::from_func_kind(FuncKind::StoreOwned { trampoline, export }, store)
     }
 
@@ -1087,7 +1087,9 @@ impl Func {
         unsafe {
             let f = self.caller_checked_anyfunc(store);
             VMFunctionImport {
-                body: f.as_ref().func_ptr,
+                wasm_call: f.as_ref().wasm_call,
+                native_call: f.as_ref().native_call,
+                array_call: f.as_ref().array_call,
                 vmctx: f.as_ref().vmctx,
             }
         }
@@ -1874,7 +1876,7 @@ macro_rules! impl_into_func {
                 /// Note that this shim's ABI must *exactly* match that expected
                 /// by Cranelift, since Cranelift is generating raw function
                 /// calls directly to this function.
-                unsafe extern "C" fn wasm_to_host_shim<T, F, $($args,)* R>(
+                unsafe extern "C" fn wasm_call_trampoline<T, F, $($args,)* R>(
                     vmctx: *mut VMOpaqueContext,
                     caller_vmctx: *mut VMContext,
                     $( $args: $args::Abi, )*
@@ -1964,7 +1966,7 @@ macro_rules! impl_into_func {
                 /// It reads the arguments out of the incoming `args` array,
                 /// calls the given function pointer, and then stores the result
                 /// back into the `args` array.
-                unsafe extern "C" fn host_to_wasm_trampoline<$($args,)* R>(
+                unsafe extern "C" fn array_call_trampoline<$($args,)* R>(
                     callee_vmctx: *mut VMOpaqueContext,
                     caller_vmctx: *mut VMContext,
                     ptr: *const VMFunctionBody,
@@ -2001,17 +2003,23 @@ macro_rules! impl_into_func {
 
                 let shared_signature_id = engine.signatures().register(ty.as_wasm_func_type());
 
-                let trampoline = host_to_wasm_trampoline::<$($args,)* R>;
+                let array_call = array_call_trampoline::<$($args,)* R>;
+
+                // TODO: for now, `wasm_call` and `native_call` use the same
+                // convention, so reuse the `wasm_call` trampoline.
+                let wasm_call = NonNull::new(wasm_call_trampoline::<T, F, $($args,)* R> as *mut _).unwrap();
+                let native_call = wasm_call;
 
                 let ctx = unsafe {
                     VMHostFuncContext::new(
-                        NonNull::new(wasm_to_host_shim::<T, F, $($args,)* R> as *mut _).unwrap(),
+                        native_call,
+                        array_call,
                         shared_signature_id,
                         Box::new(self),
                     )
                 };
 
-                (ctx, shared_signature_id, trampoline)
+                (ctx, shared_signature_id, array_call)
             }
         }
     }
@@ -2039,7 +2047,7 @@ pub(crate) struct HostFunc {
     signature: VMSharedSignatureIndex,
 
     // Trampoline to enter this function from Rust.
-    host_to_wasm_trampoline: VMTrampoline,
+    array_call_trampoline: VMTrampoline,
 
     // Stored to unregister this function's signature with the engine when this
     // is dropped.
@@ -2102,7 +2110,7 @@ impl HostFunc {
         HostFunc {
             ctx,
             signature,
-            host_to_wasm_trampoline: trampoline,
+            array_call_trampoline: trampoline,
             engine: engine.clone(),
         }
     }
@@ -2184,9 +2192,9 @@ impl FuncData {
     pub(crate) fn trampoline(&self) -> VMTrampoline {
         match &self.kind {
             FuncKind::StoreOwned { trampoline, .. } => *trampoline,
-            FuncKind::SharedHost(host) => host.host_to_wasm_trampoline,
-            FuncKind::RootedHost(host) => host.host_to_wasm_trampoline,
-            FuncKind::Host(host) => host.host_to_wasm_trampoline,
+            FuncKind::SharedHost(host) => host.array_call_trampoline,
+            FuncKind::RootedHost(host) => host.array_call_trampoline,
+            FuncKind::Host(host) => host.array_call_trampoline,
         }
     }
 

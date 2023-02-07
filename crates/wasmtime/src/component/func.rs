@@ -116,15 +116,16 @@ impl Func {
             Export::Function(f) => f,
             _ => unreachable!(),
         };
-        let trampoline = store.lookup_trampoline(unsafe { export.anyfunc.as_ref() });
+        let trampoline = unsafe { export.anyfunc.as_ref().array_call };
         let memory = options
             .memory
             .map(|i| NonNull::new(data.instance().runtime_memory(i)).unwrap());
         let realloc = options.realloc.map(|i| data.instance().runtime_realloc(i));
         let post_return = options.post_return.map(|i| {
             let anyfunc = data.instance().runtime_post_return(i);
-            let trampoline = store.lookup_trampoline(unsafe { anyfunc.as_ref() });
-            (ExportFunction { anyfunc }, trampoline)
+            (ExportFunction { anyfunc }, unsafe {
+                anyfunc.as_ref().array_call
+            })
         });
         let component_instance = options.instance;
         let options = unsafe { Options::new(store.id(), memory, realloc, options.string_encoding) };

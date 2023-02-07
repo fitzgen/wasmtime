@@ -332,13 +332,17 @@ impl<'a> Instantiator<'a> {
     }
 
     fn always_trap(&mut self, trap: &AlwaysTrap) {
+        let signature = self
+            .component
+            .signatures()
+            .shared_signature(trap.canonical_abi)
+            .expect("found unregistered signature");
+        drop(signature); // TODO FITZGEN
         self.data.state.set_always_trap(
             trap.index,
             self.component.always_trap_ptr(trap.index),
-            self.component
-                .signatures()
-                .shared_signature(trap.canonical_abi)
-                .expect("found unregistered signature"),
+            todo!(),
+            signature,
         );
     }
 

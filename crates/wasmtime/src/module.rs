@@ -11,6 +11,7 @@ use std::fs;
 use std::mem;
 use std::ops::Range;
 use std::path::Path;
+use std::ptr::NonNull;
 use std::sync::Arc;
 use wasmparser::{Parser, ValidPayload, Validator};
 use wasmtime_environ::{
@@ -20,7 +21,7 @@ use wasmtime_environ::{
 use wasmtime_jit::{CodeMemory, CompiledModule, CompiledModuleInfo};
 use wasmtime_runtime::{
     CompiledModuleId, MemoryImage, MmapVec, ModuleMemoryImages, VMFunctionBody,
-    VMSharedSignatureIndex,
+    VMSharedSignatureIndex, VMTrampoline,
 };
 
 mod registry;
@@ -1179,6 +1180,14 @@ impl wasmtime_runtime::ModuleRuntimeInfo for ModuleInner {
             .cast_mut()
     }
 
+    fn native_call_trampoline(&self, index: DefinedFuncIndex) -> NonNull<VMFunctionBody> {
+        NonNull::new(self.function(index)).unwrap()
+    }
+
+    fn array_call_trampoline(&self, index: VMSharedSignatureIndex) -> wasmtime_runtime::VMTrampoline {
+        self.code.signatures().trampoline(index).unwrap()
+    }
+
     fn memory_image(&self, memory: DefinedMemoryIndex) -> Result<Option<&Arc<MemoryImage>>> {
         let images = self.memory_images()?;
         Ok(images.and_then(|images| images.get_memory_image(memory)))
@@ -1264,6 +1273,14 @@ impl wasmtime_runtime::ModuleRuntimeInfo for BareModuleInfo {
     }
 
     fn function(&self, _index: DefinedFuncIndex) -> *mut VMFunctionBody {
+        unreachable!()
+    }
+
+    fn native_call_trampoline(&self, _index: DefinedFuncIndex) -> NonNull<VMFunctionBody> {
+        unreachable!()
+    }
+
+    fn array_call_trampoline(&self, _index: VMSharedSignatureIndex) -> VMTrampoline {
         unreachable!()
     }
 

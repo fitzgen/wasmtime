@@ -209,13 +209,20 @@ pub trait Compiler: Send + Sync {
         resolve_reloc: &dyn Fn(usize, FuncIndex) -> usize,
     ) -> Result<Vec<(SymbolId, FunctionLoc)>>;
 
-    /// Inserts two functions for host-to-wasm and wasm-to-host trampolines into
-    /// the `obj` provided.
+    /// Inserts two trampolines into the `obj` provided:
     ///
-    /// This will configure the same sections as `emit_obj`, but will likely be
-    /// much smaller. The two returned `Trampoline` structures describe where to
-    /// find the host-to-wasm and wasm-to-host trampolines in the text section,
-    /// respectively.
+    /// 1. A trampoline that takes arguments and returns results in the "array"
+    ///    calling convention but calls the actual callee via the Wasm calling
+    ///    convention.
+    /// 2. A trampoline that takes arguments and returns results in the Wasm
+    ///    calling convention but calls the actual callee via the "array"
+    ///    calling convention.
+    ///
+    /// This will configure the same sections as `append_code`, but will likely be
+    /// much smaller.
+    ///
+    /// The two returned `FunctionLoc` structures describe where to find the
+    /// trampolines in the text section, respectively.
     fn emit_trampoline_obj(
         &self,
         ty: &WasmFuncType,

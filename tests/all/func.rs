@@ -4,6 +4,227 @@ use std::sync::Arc;
 use wasmtime::*;
 
 #[test]
+fn call_wasm_to_wasm() -> Result<()> {
+    let wasm = wat::parse_str(
+        r#"
+          (module
+            (func (result i32 i32 i32)
+              i32.const 1
+              i32.const 2
+              i32.const 3
+            )
+            (func (export "run") (result i32 i32 i32)
+                call 0
+            )
+          )
+        "#,
+    )?;
+    let mut store = Store::<()>::default();
+    let module = Module::new(store.engine(), &wasm)?;
+    let instance = Instance::new(&mut store, &module, &[])?;
+    let func = instance
+        .get_typed_func::<(), (i32, i32, i32)>(&mut store, "run")
+        .unwrap();
+    let results = func.call(&mut store, ())?;
+    assert_eq!(results, (1, 2, 3));
+    Ok(())
+}
+
+#[test]
+fn call_wasm_to_native() -> Result<()> {
+    let wasm = wat::parse_str(
+        r#"
+          (module
+            (import "" "" (func (result i32 i32 i32)))
+            (func (export "run") (result i32 i32 i32)
+                call 0
+            )
+          )
+        "#,
+    )?;
+    let mut store = Store::<()>::default();
+    let module = Module::new(store.engine(), &wasm)?;
+    let import_func = Func::wrap(&mut store, || (1_i32, 2_i32, 3_i32));
+    let instance = Instance::new(&mut store, &module, &[import_func.into()])?;
+    let func = instance
+        .get_typed_func::<(), (i32, i32, i32)>(&mut store, "run")
+        .unwrap();
+    let results = func.call(&mut store, ())?;
+    assert_eq!(results, (1, 2, 3));
+    panic!("TODO FITZGEN: passed!");
+    Ok(())
+}
+
+#[test]
+fn call_wasm_to_array() -> Result<()> {
+    let wasm = wat::parse_str(
+        r#"
+          (module
+            (import "" "" (func (result i32 i32 i32)))
+            (func (export "run") (result i32 i32 i32)
+                call 0
+            )
+          )
+        "#,
+    )?;
+    let mut store = Store::<()>::default();
+    let module = Module::new(store.engine(), &wasm)?;
+    let import_func = Func::new(
+        &mut store,
+        FuncType::new(vec![], vec![ValType::I32, ValType::I32, ValType::I32]),
+        |_, _params, results| {
+            results[0] = Val::I32(1);
+            results[1] = Val::I32(2);
+            results[2] = Val::I32(3);
+            Ok(())
+        },
+    );
+    let instance = Instance::new(&mut store, &module, &[import_func.into()])?;
+    let func = instance
+        .get_typed_func::<(), (i32, i32, i32)>(&mut store, "run")
+        .unwrap();
+    let results = func.call(&mut store, ())?;
+    assert_eq!(results, (1, 2, 3));
+    panic!("TODO FITZGEN: passed!");
+    Ok(())
+}
+
+#[test]
+fn call_native_to_wasm() -> Result<()> {
+    let wasm = wat::parse_str(
+        r#"
+          (module
+            (func (export "run") (result i32 i32 i32)
+                i32.const 42
+                i32.const 420
+                i32.const 4200
+            )
+          )
+        "#,
+    )?;
+    let mut store = Store::<()>::default();
+    let module = Module::new(store.engine(), &wasm)?;
+    let instance = Instance::new(&mut store, &module, &[])?;
+    let func = instance
+        .get_typed_func::<(), (i32, i32, i32)>(&mut store, "run")
+        .unwrap();
+    let results = func.call(&mut store, ())?;
+    assert_eq!(results, (42, 420, 4200));
+    Ok(())
+}
+
+#[test]
+fn call_native_to_native() -> Result<()> {
+    let mut store = Store::<()>::default();
+
+    let func = Func::wrap(&mut store, |a: i32, b: i32, c: i32| -> (i32, i32, i32) {
+        (b, c, a)
+    });
+    let func = func.typed::<(i32, i32, i32), (i32, i32, i32)>(&store)?;
+    let results = func.call(&mut store, (1, 2, 3))?;
+    assert_eq!(results, (2, 3, 1));
+    Ok(())
+}
+
+#[test]
+fn call_native_to_array() -> Result<()> {
+    let mut store = Store::<()>::default();
+
+    let func = Func::new(
+        &mut store,
+        FuncType::new(
+            [ValType::I32, ValType::I32, ValType::I32],
+            [ValType::I32, ValType::I32, ValType::I32],
+        ),
+        |_caller, params, results| {
+            results[0] = params[2].clone();
+            results[1] = params[0].clone();
+            results[2] = params[1].clone();
+            Ok(())
+        },
+    );
+    let func = func.typed::<(i32, i32, i32), (i32, i32, i32)>(&store)?;
+    let results = func.call(&mut store, (1, 2, 3))?;
+    assert_eq!(results, (3, 1, 2));
+    Ok(())
+}
+
+#[test]
+fn call_array_to_wasm() -> Result<()> {
+    let wasm = wat::parse_str(
+        r#"
+          (module
+            (func (export "run") (param i32 i32 i32) (result i32 i32 i32)
+              local.get 1
+              local.get 2
+              local.get 0
+            )
+          )
+        "#,
+    )?;
+    let mut store = Store::<()>::default();
+    let module = Module::new(store.engine(), &wasm)?;
+    let instance = Instance::new(&mut store, &module, &[])?;
+    let func = instance.get_func(&mut store, "run").unwrap();
+    let mut results = [Val::I32(0), Val::I32(0), Val::I32(0)];
+    func.call(
+        &mut store,
+        &[Val::I32(10), Val::I32(20), Val::I32(30)],
+        &mut results,
+    )?;
+    assert_eq!(results[0].i32(), Some(20));
+    assert_eq!(results[1].i32(), Some(30));
+    assert_eq!(results[2].i32(), Some(10));
+    Ok(())
+}
+
+#[test]
+fn call_array_to_native() -> Result<()> {
+    let mut store = Store::<()>::default();
+    let func = Func::wrap(&mut store, |a: i32, b: i32, c: i32| -> (i32, i32, i32) {
+        (a * 10, b * 10, c * 10)
+    });
+    let mut results = [Val::I32(0), Val::I32(0), Val::I32(0)];
+    func.call(
+        &mut store,
+        &[Val::I32(10), Val::I32(20), Val::I32(30)],
+        &mut results,
+    )?;
+    assert_eq!(results[0].i32(), Some(100));
+    assert_eq!(results[1].i32(), Some(200));
+    assert_eq!(results[2].i32(), Some(300));
+    Ok(())
+}
+
+#[test]
+fn call_array_to_array() -> Result<()> {
+    let mut store = Store::<()>::default();
+    let func = Func::new(
+        &mut store,
+        FuncType::new(
+            [ValType::I32, ValType::I32, ValType::I32],
+            [ValType::I32, ValType::I32, ValType::I32],
+        ),
+        |_caller, params, results| {
+            results[0] = params[2].clone();
+            results[1] = params[0].clone();
+            results[2] = params[1].clone();
+            Ok(())
+        },
+    );
+    let mut results = [Val::I32(0), Val::I32(0), Val::I32(0)];
+    func.call(
+        &mut store,
+        &[Val::I32(10), Val::I32(20), Val::I32(30)],
+        &mut results,
+    )?;
+    assert_eq!(results[0].i32(), Some(30));
+    assert_eq!(results[1].i32(), Some(10));
+    assert_eq!(results[2].i32(), Some(20));
+    Ok(())
+}
+
+#[test]
 fn func_constructors() {
     let mut store = Store::<()>::default();
     Func::wrap(&mut store, || {});

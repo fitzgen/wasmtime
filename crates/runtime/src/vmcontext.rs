@@ -20,8 +20,15 @@ pub const VMCONTEXT_MAGIC: u32 = u32::from_le_bytes(*b"core");
 #[derive(Debug, Copy, Clone)]
 #[repr(C)]
 pub struct VMFunctionImport {
-    /// A pointer to the imported function body.
-    pub body: NonNull<VMFunctionBody>,
+    /// Function pointer to use when calling this imported function from Wasm.
+    pub wasm_call: *mut VMFunctionBody,
+
+    /// Function pointer to use when calling this imported function from native code.
+    pub native_call: NonNull<VMFunctionBody>,
+
+    /// Function pointer to use when calling this imported function with the
+    /// "array" calling convention that `Func::new` et al use.
+    pub array_call: VMTrampoline,
 
     /// The VM state associated with this function.
     ///
@@ -577,22 +584,37 @@ impl Default for VMSharedSignatureIndex {
     }
 }
 
-/// The VM caller-checked "anyfunc" record, for caller-side signature checking.
-/// It consists of the actual function pointer and a signature id to be checked
-/// by the caller.
+/// The VM caller-checked "funcref" record, for caller-side signature checking.
+///
+/// It consists of function pointer(s), a signature id to be checked by the
+/// caller, and the vmctx closure associated with this function.
 #[derive(Debug, Clone)]
 #[repr(C)]
 pub struct VMCallerCheckedFuncRef {
-    /// Function body.
-    pub func_ptr: NonNull<VMFunctionBody>,
+    /// Function pointer for this funcref if being called via the native calling
+    /// convention.
+    pub native_call: NonNull<VMFunctionBody>,
+
+    /// Function pointer for this funcref if being called via the "array"
+    /// calling convention that `Func::new` et al use.
+    pub array_call: VMTrampoline,
+
+    /// Function pointer for this funcref if being called via the calling
+    /// convention we use when compiling Wasm.
+    ///
+    /// This can be null if no Wasm is loaded in the system or this `funcref`
+    /// hasn't been exposed to Wasm at all.
+    pub wasm_call: *mut VMFunctionBody,
+
     /// Function signature id.
     pub type_index: VMSharedSignatureIndex,
+
     /// The VM state associated with this function.
     ///
-    /// For core wasm instances this will be `*mut VMContext` but for the
-    /// upcoming implementation of the component model this will be something
-    /// else. The actual definition of what this pointer points to depends on
-    /// the definition of `func_ptr` and what compiled it.
+    /// The actual definition of what this pointer points to depends on the
+    /// function being referenced: for core Wasm functions, this is a `*mut
+    /// VMContext`, for host functions it is a `*mut VMHostFuncContext`, and for
+    /// component functions it is a `*mut VMComponentContext`.
     pub vmctx: *mut VMOpaqueContext,
     // If more elements are added here, remember to add offset_of tests below!
 }
@@ -608,7 +630,7 @@ mod test_vmcaller_checked_anyfunc {
     use wasmtime_environ::{Module, PtrSize, VMOffsets};
 
     #[test]
-    fn check_vmcaller_checked_anyfunc_offsets() {
+    fn check_vmcaller_checked_func_ref_offsets() {
         let module = Module::new();
         let offsets = VMOffsets::new(size_of::<*mut u8>() as u8, &module);
         assert_eq!(
@@ -616,8 +638,16 @@ mod test_vmcaller_checked_anyfunc {
             usize::from(offsets.ptr.size_of_vmcaller_checked_func_ref())
         );
         assert_eq!(
-            offset_of!(VMCallerCheckedFuncRef, func_ptr),
-            usize::from(offsets.ptr.vmcaller_checked_func_ref_func_ptr())
+            offset_of!(VMCallerCheckedFuncRef, native_call),
+            usize::from(offsets.ptr.vmcaller_checked_func_ref_native_call())
+        );
+        assert_eq!(
+            offset_of!(VMCallerCheckedFuncRef, array_call),
+            usize::from(offsets.ptr.vmcaller_checked_func_ref_array_call())
+        );
+        assert_eq!(
+            offset_of!(VMCallerCheckedFuncRef, wasm_call),
+            usize::from(offsets.ptr.vmcaller_checked_func_ref_wasm_call())
         );
         assert_eq!(
             offset_of!(VMCallerCheckedFuncRef, type_index),

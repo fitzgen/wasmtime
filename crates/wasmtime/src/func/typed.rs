@@ -178,7 +178,7 @@ where
             let (anyfunc, ret, params, returned) = &mut captures;
             let anyfunc = anyfunc.as_ref();
             let result = Params::invoke::<Results>(
-                anyfunc.func_ptr.as_ptr(),
+                anyfunc.native_call.as_ptr(),
                 anyfunc.vmctx,
                 caller,
                 *params,

@@ -115,7 +115,7 @@ where
     let mut obj = engine
         .compiler()
         .object(wasmtime_environ::ObjectKind::Module)?;
-    let (t1, t2) = engine.compiler().emit_trampoline_obj(
+    let (array_call_range, wasm_call_range) = engine.compiler().emit_trampoline_obj(
         ft.as_wasm_func_type(),
         stub_fn::<F> as usize,
         &mut obj,
@@ -134,19 +134,23 @@ where
     // we know their start/length.
 
     let text = code_memory.text();
-    let host_trampoline = text[t1.start as usize..][..t1.length as usize].as_ptr();
-    let wasm_trampoline = text[t2.start as usize..].as_ptr() as *mut _;
-    let wasm_trampoline = NonNull::new(wasm_trampoline).unwrap();
+    let array_call =
+        text[array_call_range.start as usize..][..array_call_range.length as usize].as_ptr();
+    let array_call = unsafe { std::mem::transmute::<*const u8, VMTrampoline>(array_call) };
+    let wasm_call = text[wasm_call_range.start as usize..].as_ptr() as *mut _;
+    let wasm_call = NonNull::new(wasm_call).unwrap();
+    // TODO: these are the same calling convention today, but will not always be!
+    let native_call = wasm_call;
 
     let sig = engine.signatures().register(ft.as_wasm_func_type());
 
     unsafe {
         let ctx = VMHostFuncContext::new(
-            wasm_trampoline,
+            native_call,
+            array_call,
             sig,
             Box::new(TrampolineState { func, code_memory }),
         );
-        let host_trampoline = std::mem::transmute::<*const u8, VMTrampoline>(host_trampoline);
-        Ok((ctx, sig, host_trampoline))
+        Ok((ctx, sig, array_call))
     }
 }

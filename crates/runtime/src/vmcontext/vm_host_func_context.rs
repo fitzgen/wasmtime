@@ -2,13 +2,14 @@
 //!
 //! Keep in sync with `wasmtime_environ::VMHostFuncOffsets`.
 
-use wasmtime_environ::VM_HOST_FUNC_MAGIC;
-
-use super::{VMCallerCheckedFuncRef, VMFunctionBody, VMOpaqueContext, VMSharedSignatureIndex};
+use super::{
+    VMCallerCheckedFuncRef, VMFunctionBody, VMOpaqueContext, VMSharedSignatureIndex, VMTrampoline,
+};
 use std::{
     any::Any,
     ptr::{self, NonNull},
 };
+use wasmtime_environ::VM_HOST_FUNC_MAGIC;
 
 /// The `VM*Context` for host functions.
 ///
@@ -38,11 +39,14 @@ impl VMHostFuncContext {
     /// must be `Send` and `Sync`.
     pub unsafe fn new(
         host_func: NonNull<VMFunctionBody>,
+        array_call_trampoline: VMTrampoline,
         signature: VMSharedSignatureIndex,
         host_state: Box<dyn Any + Send + Sync>,
     ) -> Box<VMHostFuncContext> {
         let wasm_to_host_trampoline = VMCallerCheckedFuncRef {
-            func_ptr: NonNull::new(crate::trampolines::wasm_to_host_trampoline as _).unwrap(),
+            native_call: host_func,
+            array_call: array_call_trampoline,
+            wasm_call: crate::trampolines::wasm_to_host_trampoline as _,
             type_index: signature,
             vmctx: ptr::null_mut(),
         };

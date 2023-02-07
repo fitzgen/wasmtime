@@ -513,30 +513,38 @@ impl Instance {
         sig: SignatureIndex,
         into: *mut VMCallerCheckedFuncRef,
     ) {
+        // TODO: assert that this is only called for functions that can be
+        // turned into `funcref`s.
+
         let type_index = unsafe {
             let base: *const VMSharedSignatureIndex =
                 *self.vmctx_plus_offset(self.offsets().vmctx_signature_ids_array());
             *base.add(sig.index())
         };
 
-        let (func_ptr, vmctx) = if let Some(def_index) = self.module().defined_func_index(index) {
-            (
-                self.runtime_info.function(def_index),
-                VMOpaqueContext::from_vmcontext(self.vmctx_ptr()),
-            )
+        let funcref = if let Some(def_index) = self.module().defined_func_index(index) {
+            VMCallerCheckedFuncRef {
+                native_call: self.runtime_info.native_call_trampoline(def_index),
+                array_call: self.runtime_info.array_call_trampoline(type_index),
+                wasm_call: self.runtime_info.function(def_index),
+                vmctx: VMOpaqueContext::from_vmcontext(self.vmctx_ptr()),
+                type_index,
+            }
         } else {
             let import = self.imported_function(index);
-            (import.body.as_ptr(), import.vmctx)
+            VMCallerCheckedFuncRef {
+                native_call: import.native_call,
+                array_call: import.array_call,
+                wasm_call: import.wasm_call,
+                vmctx: import.vmctx,
+                type_index,
+            }
         };
 
         // Safety: we have a `&mut self`, so we have exclusive access
         // to this Instance.
         unsafe {
-            *into = VMCallerCheckedFuncRef {
-                vmctx,
-                type_index,
-                func_ptr: NonNull::new(func_ptr).expect("Non-null function pointer"),
-            };
+            std::ptr::write(into, funcref);
         }
     }
 

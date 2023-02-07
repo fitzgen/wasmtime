@@ -21,6 +21,7 @@
 )]
 
 use anyhow::Error;
+use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use wasmtime_environ::{DefinedFuncIndex, DefinedMemoryIndex, HostPtr, VMOffsets};
@@ -170,6 +171,14 @@ pub trait ModuleRuntimeInfo: Send + Sync + 'static {
 
     /// Returns the address, in memory, that the function `index` resides at.
     fn function(&self, index: DefinedFuncIndex) -> *mut VMFunctionBody;
+
+    /// Returns the address, in memory, of the trampoline that allows the given
+    /// defined Wasm function to be called by the native calling convention.
+    fn native_call_trampoline(&self, index: DefinedFuncIndex) -> NonNull<VMFunctionBody>;
+
+    /// Returns the address, in memory, of the trampoline that allows the given
+    /// defined Wasm function to be called by the array calling convention.
+    fn array_call_trampoline(&self, index: VMSharedSignatureIndex) -> VMTrampoline;
 
     /// Returns the `MemoryImage` structure used for copy-on-write
     /// initialization of the memory, if it's applicable.

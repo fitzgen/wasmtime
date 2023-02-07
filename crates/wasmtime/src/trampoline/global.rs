@@ -54,7 +54,9 @@ pub fn create_global(store: &mut StoreOpaque, gt: &GlobalType, val: Val) -> Resu
                     });
 
                 func_imports.push(VMFunctionImport {
-                    body: f.func_ptr,
+                    native_call: f.native_call,
+                    array_call: f.array_call,
+                    wasm_call: f.wasm_call,
                     vmctx: f.vmctx,
                 });
 

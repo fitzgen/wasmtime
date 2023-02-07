@@ -1600,7 +1600,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
             pointer_type,
             mem_flags,
             funcref_ptr,
-            i32::from(self.offsets.ptr.vmcaller_checked_func_ref_func_ptr()),
+            i32::from(self.offsets.ptr.vmcaller_checked_func_ref_wasm_call()),
         );
 
         // If necessary, check the signature.

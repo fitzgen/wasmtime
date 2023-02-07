@@ -8,7 +8,7 @@
 
 use crate::{
     Store, VMCallerCheckedFuncRef, VMFunctionBody, VMGlobalDefinition, VMMemoryDefinition,
-    VMOpaqueContext, VMSharedSignatureIndex, ValRaw,
+    VMOpaqueContext, VMSharedSignatureIndex, VMTrampoline, ValRaw,
 };
 use memoffset::offset_of;
 use std::alloc::{self, Layout};
@@ -268,7 +268,7 @@ impl ComponentInstance {
 
     unsafe fn anyfunc(&self, offset: u32) -> NonNull<VMCallerCheckedFuncRef> {
         let ret = self.vmctx_plus_offset::<VMCallerCheckedFuncRef>(offset);
-        debug_assert!((*ret).func_ptr.as_ptr() as usize != INVALID_PTR);
+        debug_assert!((*ret).wasm_call as usize != INVALID_PTR);
         debug_assert!((*ret).vmctx as usize != INVALID_PTR);
         NonNull::new(ret).unwrap()
     }
@@ -342,9 +342,11 @@ impl ComponentInstance {
                 *self.vmctx_plus_offset::<usize>(self.offsets.lowering_data(idx)) == INVALID_PTR
             );
             *self.vmctx_plus_offset(self.offsets.lowering(idx)) = lowering;
+            drop(anyfunc_type_index);
             self.set_anyfunc(
                 self.offsets.lowering_anyfunc(idx),
                 anyfunc_func_ptr,
+                todo!(),
                 anyfunc_type_index,
             );
         }
@@ -355,9 +357,17 @@ impl ComponentInstance {
         &mut self,
         idx: RuntimeAlwaysTrapIndex,
         func_ptr: NonNull<VMFunctionBody>,
+        array_call_trampoline: VMTrampoline,
         type_index: VMSharedSignatureIndex,
     ) {
-        unsafe { self.set_anyfunc(self.offsets.always_trap_anyfunc(idx), func_ptr, type_index) }
+        unsafe {
+            self.set_anyfunc(
+                self.offsets.always_trap_anyfunc(idx),
+                func_ptr,
+                array_call_trampoline,
+                type_index,
+            );
+        }
     }
 
     /// Same as `set_lowering` but for the transcoder functions.
@@ -367,19 +377,32 @@ impl ComponentInstance {
         func_ptr: NonNull<VMFunctionBody>,
         type_index: VMSharedSignatureIndex,
     ) {
-        unsafe { self.set_anyfunc(self.offsets.transcoder_anyfunc(idx), func_ptr, type_index) }
+        drop(type_index); // TODO FITZGEN
+        unsafe {
+            self.set_anyfunc(
+                self.offsets.transcoder_anyfunc(idx),
+                func_ptr,
+                todo!(),
+                type_index,
+            );
+        }
     }
 
     unsafe fn set_anyfunc(
         &mut self,
         offset: u32,
-        func_ptr: NonNull<VMFunctionBody>,
+        wasm_call: NonNull<VMFunctionBody>,
+        array_call: VMTrampoline,
         type_index: VMSharedSignatureIndex,
     ) {
         debug_assert!(*self.vmctx_plus_offset::<usize>(offset) == INVALID_PTR);
         let vmctx = self.vmctx();
         *self.vmctx_plus_offset(offset) = VMCallerCheckedFuncRef {
-            func_ptr,
+            wasm_call: wasm_call.as_ptr(),
+            // TODO: these are the same calling conventions for now, but will
+            // not always be.
+            native_call: wasm_call,
+            array_call,
             type_index,
             vmctx: VMOpaqueContext::from_vmcomponent(vmctx),
         };
@@ -543,11 +566,12 @@ impl OwnedComponentInstance {
         &mut self,
         idx: RuntimeAlwaysTrapIndex,
         func_ptr: NonNull<VMFunctionBody>,
+        array_call_trampoline: VMTrampoline,
         type_index: VMSharedSignatureIndex,
     ) {
         unsafe {
             self.instance_mut()
-                .set_always_trap(idx, func_ptr, type_index)
+                .set_always_trap(idx, func_ptr, array_call_trampoline, type_index)
         }
     }
 
