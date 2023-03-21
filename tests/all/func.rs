@@ -51,7 +51,6 @@ fn call_wasm_to_native() -> Result<()> {
         .unwrap();
     let results = func.call(&mut store, ())?;
     assert_eq!(results, (1, 2, 3));
-    panic!("TODO FITZGEN: passed!");
     Ok(())
 }
 
@@ -85,7 +84,6 @@ fn call_wasm_to_array() -> Result<()> {
         .unwrap();
     let results = func.call(&mut store, ())?;
     assert_eq!(results, (1, 2, 3));
-    panic!("TODO FITZGEN: passed!");
     Ok(())
 }
 

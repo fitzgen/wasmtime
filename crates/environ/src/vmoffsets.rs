@@ -458,24 +458,38 @@ impl<P: PtrSize> From<VMOffsetsFields<P>> for VMOffsets<P> {
 }
 
 impl<P: PtrSize> VMOffsets<P> {
-    /// The offset of the `body` field.
+    /// The offset of the `wasm_call` field.
     #[allow(clippy::erasing_op)]
     #[inline]
-    pub fn vmfunction_import_body(&self) -> u8 {
+    pub fn vmfunction_import_wasm_call(&self) -> u8 {
         0 * self.pointer_size()
+    }
+
+    /// The offset of the `native_call` field.
+    #[allow(clippy::erasing_op)]
+    #[inline]
+    pub fn vmfunction_import_native_call(&self) -> u8 {
+        1 * self.pointer_size()
+    }
+
+    /// The offset of the `array_call` field.
+    #[allow(clippy::erasing_op)]
+    #[inline]
+    pub fn vmfunction_import_array_call(&self) -> u8 {
+        2 * self.pointer_size()
     }
 
     /// The offset of the `vmctx` field.
     #[allow(clippy::identity_op)]
     #[inline]
     pub fn vmfunction_import_vmctx(&self) -> u8 {
-        1 * self.pointer_size()
+        3 * self.pointer_size()
     }
 
     /// Return the size of `VMFunctionImport`.
     #[inline]
     pub fn size_of_vmfunction_import(&self) -> u8 {
-        2 * self.pointer_size()
+        4 * self.pointer_size()
     }
 }
 
@@ -773,10 +787,22 @@ impl<P: PtrSize> VMOffsets<P> {
             + index.as_u32() * u32::from(self.ptr.size_of_vmcaller_checked_func_ref())
     }
 
-    /// Return the offset to the `body` field in `*const VMFunctionBody` index `index`.
+    /// Return the offset to the `wasm_call` field in `*const VMFunctionBody` index `index`.
     #[inline]
-    pub fn vmctx_vmfunction_import_body(&self, index: FuncIndex) -> u32 {
-        self.vmctx_vmfunction_import(index) + u32::from(self.vmfunction_import_body())
+    pub fn vmctx_vmfunction_import_wasm_call(&self, index: FuncIndex) -> u32 {
+        self.vmctx_vmfunction_import(index) + u32::from(self.vmfunction_import_wasm_call())
+    }
+
+    /// Return the offset to the `native_call` field in `*const VMFunctionBody` index `index`.
+    #[inline]
+    pub fn vmctx_vmfunction_import_native_call(&self, index: FuncIndex) -> u32 {
+        self.vmctx_vmfunction_import(index) + u32::from(self.vmfunction_import_native_call())
+    }
+
+    /// Return the offset to the `array_call` field in `*const VMFunctionBody` index `index`.
+    #[inline]
+    pub fn vmctx_vmfunction_import_array_call(&self, index: FuncIndex) -> u32 {
+        self.vmctx_vmfunction_import(index) + u32::from(self.vmfunction_import_array_call())
     }
 
     /// Return the offset to the `vmctx` field in `*const VMFunctionBody` index `index`.

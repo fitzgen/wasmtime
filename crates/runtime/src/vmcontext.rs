@@ -60,8 +60,16 @@ mod test_vmfunction_import {
             usize::from(offsets.size_of_vmfunction_import())
         );
         assert_eq!(
-            offset_of!(VMFunctionImport, body),
-            usize::from(offsets.vmfunction_import_body())
+            offset_of!(VMFunctionImport, wasm_call),
+            usize::from(offsets.vmfunction_import_wasm_call())
+        );
+        assert_eq!(
+            offset_of!(VMFunctionImport, native_call),
+            usize::from(offsets.vmfunction_import_native_call())
+        );
+        assert_eq!(
+            offset_of!(VMFunctionImport, array_call),
+            usize::from(offsets.vmfunction_import_array_call())
         );
         assert_eq!(
             offset_of!(VMFunctionImport, vmctx),

@@ -24,8 +24,8 @@ asm_func!(
     "host_to_wasm_trampoline",
     concat!(
         "
-            .cfi_startproc simple
-            .cfi_def_cfa_offset 0
+            //.cfi_startproc simple
+            //.cfi_def_cfa_offset 0
 
             // Load the pointer to `VMRuntimeLimits` in `scratch0`.
             mov ", scratch0!(), ", 8[", arg1!(), "]
@@ -42,7 +42,7 @@ asm_func!(
             // Tail call to the callee function pointer in the vmctx.
             jmp 16[", arg1!(), "]
 
-            .cfi_endproc
+            //.cfi_endproc
         ",
     ),
 );
@@ -68,8 +68,8 @@ asm_func!(
     "wasm_to_host_trampoline",
     concat!(
         "
-            .cfi_startproc simple
-            .cfi_def_cfa_offset 0
+            //.cfi_startproc simple
+            //.cfi_def_cfa_offset 0
 
             // Load the pointer to `VMRuntimeLimits` in `scratch0`.
             mov ", scratch0!(), ", 8[", arg1!(), "]
@@ -87,7 +87,7 @@ asm_func!(
             // up the offsets of stack arguments (if any).
             jmp 8[", arg0!(), "]
 
-            .cfi_endproc
+            //.cfi_endproc
         ",
     ),
 );

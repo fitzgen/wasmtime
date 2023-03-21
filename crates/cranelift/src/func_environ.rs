@@ -1707,7 +1707,7 @@ impl<'module_environment> cranelift_wasm::FuncEnvironment for FuncEnvironment<'m
 
         // Load the callee address.
         let body_offset =
-            i32::try_from(self.offsets.vmctx_vmfunction_import_body(callee_index)).unwrap();
+            i32::try_from(self.offsets.vmctx_vmfunction_import_wasm_call(callee_index)).unwrap();
         let func_addr = pos.ins().load(pointer_type, mem_flags, base, body_offset);
 
         // First append the callee vmctx address.

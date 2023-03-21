@@ -377,12 +377,11 @@ impl ComponentInstance {
         func_ptr: NonNull<VMFunctionBody>,
         type_index: VMSharedSignatureIndex,
     ) {
-        drop(type_index); // TODO FITZGEN
         unsafe {
             self.set_anyfunc(
                 self.offsets.transcoder_anyfunc(idx),
                 func_ptr,
-                todo!(),
+                todo!(), // TODO FITZGEN
                 type_index,
             );
         }
