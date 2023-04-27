@@ -493,6 +493,48 @@
        (CallUnknown (dest RegMem)
                     (info BoxCallInfo))
 
+       ;; Tail call to a direct destination.
+       (ReturnCallKnown
+        ;; The function we are calling.
+        (callee ExternalName)
+        ;; The size of the new stack frame's stack arguments. This is necessary
+        ;; for copying the frame over our current frame. It must already be
+        ;; allocated on the stack.
+        (new_stack_arg_size u32)
+        ;; The size of the current/old stack frame's stack arguments.
+        (old_stack_arg_size u32)
+        ;; The return address. Needs to be written into the correct stack slot
+        ;; after the new stack frame is copied into place.
+        (ret_addr Gpr)
+        ;; A copy of the frame pointer, because we will overwrite the current
+        ;; `rbp`.
+        (fp Gpr)
+        ;; A temporary register.
+        (tmp WritableGpr)
+        ;; The in-register arguments and their constraints.
+        (uses CallArgList))
+
+       ;; Tail call to an indirect destination.
+       (ReturnCallUnknown
+        ;; The function we are calling.
+        (callee RegMem)
+        ;; The size of the new stack frame's stack arguments. This is necessary
+        ;; for copying the frame over our current frame. It must already be
+        ;; allocated on the stack.
+        (new_stack_arg_size u32)
+        ;; The size of the current/old stack frame's stack arguments.
+        (old_stack_arg_size u32)
+        ;; The return address. Needs to be written into the correct stack slot
+        ;; after the new stack frame is copied into place.
+        (ret_addr Gpr)
+        ;; A copy of the frame pointer, because we will overwrite the current
+        ;; `rbp`.
+        (fp Gpr)
+        ;; A temporary register.
+        (tmp WritableGpr)
+        ;; The in-register arguments and their constraints.
+        (uses CallArgList))
+
        ;; A pseudo-instruction that captures register arguments in vregs.
        (Args
         (args VecArgPair))

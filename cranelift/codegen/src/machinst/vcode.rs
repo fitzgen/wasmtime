@@ -974,6 +974,13 @@ impl<I: VCodeInst> VCode<I> {
                         // a return, place an epilogue at this point
                         // (and don't emit the return; the actual
                         // epilogue will contain it).
+                        //
+                        // TODO FITZGEN: should we match
+                        // `MachTerminator::RetCall` here as well? Or pass the
+                        // instruction into the `gen_epilogue` method? This way
+                        // we could handle post-regalloc `CalleeSaveRegList`
+                        // when emitting these sequences, because lowering
+                        // happens pre-regalloc.
                         if self.insts[iix.index()].is_term() == MachTerminator::Ret {
                             for inst in self.abi.gen_epilogue(&self.sigs) {
                                 do_emit(&inst, &[], &mut disasm, &mut buffer, &mut state);
@@ -1255,8 +1262,8 @@ impl<I: VCodeInst> RegallocFunction for VCode<I> {
         match self.insts[insn.index()].is_term() {
             // We treat blocks terminated by an unconditional trap like a return for regalloc.
             MachTerminator::None => self.insts[insn.index()].is_trap(),
-            MachTerminator::Ret => true,
-            _ => false,
+            MachTerminator::Ret | MachTerminator::RetCall => true,
+            MachTerminator::Uncond | MachTerminator::Cond | MachTerminator::Indirect => false,
         }
     }
 

@@ -180,6 +180,7 @@
 (type RelocDistance (primitive RelocDistance))
 (type VecArgPair extern (enum))
 (type VecRetPair extern (enum))
+(type CallArgList extern (enum))
 
 ;;;; Helper Clif Extractors ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -998,6 +999,51 @@
 
 (decl gen_return (ValueSlice) Unit)
 (extern constructor gen_return gen_return)
+
+;; TODO FITZGEN: where does this comment belong?
+;;
+;; Second, atomically copy the stack frame over our current frame
+;; and do the tail call. This has to be atomic to avoid regalloc
+;; inserting spills in the middle of this sequence, or trying to
+;; reload values from stack slots that we are overwriting.
+;;
+;; Note that we do not need to save the current frame or stack
+;; pointers into temporaries in order to implement the frame
+;; copy. Initially we have the old frame like so:
+;;
+;;                               rbp                   rsp
+;;                                |                     |
+;;                                V                     V
+;;      [ old stack args | RA | old FP | old stack slots ]
+;;
+;; Then we bump `rsp` and build the new frame in the newly allocated
+;; stack space:
+;;
+;;                                   rbp                                        rsp
+;;                                    |                                          |
+;;                                    V                                          V
+;;     [ ... | old stack args | RA | old FP | old stack slots | new stack args | RA ]
+;;                                                              |                |
+;;             .------------------------------------------------'                |
+;;             |                 .-----------------------------------------------'
+;;             |                 |
+;;             V                 V
+;;     [ ... | new stack args | RA | ... ]
+;;     ^                        ^
+;;     '----.                   |
+;;          |                   |
+;;         rbp                 rsp
+;;
+;; Now, to copy the new stack arguments and RA down over the old
+;; ones, we can use `rbp`- and `rsp`-relative addressing, without
+;; having needed to save either of them in a temporary register. (We
+;; will still need a temporary for loading words from the new frame
+;; before storing them into the old frame's location.)
+(decl gen_return_call (SigRef ExternalName RelocDistance ValueSlice) InstOutput)
+(extern constructor gen_return_call gen_return_call)
+
+(decl gen_return_call_indirect (SigRef Value ValueSlice) InstOutput)
+(extern constructor gen_return_call_indirect gen_return_call_indirect)
 
 ;; Helper for extracting an immediate that's not 0 and not -1 from an imm64.
 (decl pure partial safe_divisor_from_imm64 (Type Imm64) u64)
