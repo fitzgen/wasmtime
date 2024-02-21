@@ -1,5 +1,5 @@
-use anyhow::{bail, Result};
-use std::fmt::{self, Display};
+use anyhow::{bail, ensure, Error, Result};
+use std::fmt::{self, Debug, Display};
 use wasmtime_environ::{
     EngineOrModuleTypeIndex, EntityType, Global, Memory, ModuleTypes, Table, WasmFuncType,
     WasmHeapType, WasmRefType, WasmValType,
@@ -90,6 +90,9 @@ impl ValType {
 
     /// The `nullfuncref` type, aka `(ref null nofunc)`.
     pub const NULLFUNCREF: Self = ValType::Ref(RefType::NULLFUNCREF);
+
+    /// The `nullref` type, aka `(ref null none)`.
+    pub const NULLREF: Self = ValType::Ref(RefType::NULLREF);
 
     /// Returns true if `ValType` matches any of the numeric types. (e.g. `I32`,
     /// `I64`, `F32`, `F64`).
@@ -298,6 +301,12 @@ impl RefType {
         heap_type: HeapType::Extern,
     };
 
+    /// The `nullexternref` type, aka `(ref null noextern)`.
+    pub const NULLEXTERNREF: Self = RefType {
+        is_nullable: true,
+        heap_type: HeapType::Extern,
+    };
+
     /// The `funcref` type, aka `(ref null func)`.
     pub const FUNCREF: Self = RefType {
         is_nullable: true,
@@ -308,6 +317,42 @@ impl RefType {
     pub const NULLFUNCREF: Self = RefType {
         is_nullable: true,
         heap_type: HeapType::NoFunc,
+    };
+
+    /// The `anyref` type, aka `(ref null any)`.
+    pub const ANYREF: Self = RefType {
+        is_nullable: true,
+        heap_type: HeapType::Any,
+    };
+
+    /// The `eqref` type, aka `(ref null eq)`.
+    pub const EQREF: Self = RefType {
+        is_nullable: true,
+        heap_type: HeapType::Eq,
+    };
+
+    /// The `i31ref` type, aka `(ref null i31)`.
+    pub const I31REF: Self = RefType {
+        is_nullable: true,
+        heap_type: HeapType::I31,
+    };
+
+    /// The `structref` type, aka `(ref null struct)`.
+    pub const STRUCTREF: Self = RefType {
+        is_nullable: true,
+        heap_type: HeapType::Struct,
+    };
+
+    /// The `arrayref` type, aka `(ref null array)`.
+    pub const ARRAYREF: Self = RefType {
+        is_nullable: true,
+        heap_type: HeapType::Array,
+    };
+
+    /// The `nullref` type, aka `(ref null none)`.
+    pub const NULLREF: Self = RefType {
+        is_nullable: true,
+        heap_type: HeapType::None,
     };
 
     /// Construct a new reference type.
@@ -387,6 +432,79 @@ impl RefType {
 
 /// The heap types that can Wasm can have references to.
 ///
+/// # Type Hierarchies
+///
+/// Wasm has three separate heap type hierarchies, each with their own top and
+/// bottom types:
+///
+/// 1. **Function**
+///
+///    There are an infinite number of types in the function type hierarchy
+///    because it contains all concrete function types that Wasm (or the
+///    embedder) can define. It additionally contains the `func` top type and
+///    the `nofunc` bottom type.
+///
+///    ```text
+///               func
+///                |
+///                |
+///                |
+///   <all concrete function types>
+///                |
+///                |
+///                |
+///              nofunc
+///    ```
+///
+/// 2. **External**
+///
+///    There are two types in the external type hierarchy: `extern` and
+///    `noextern`. They are the top and bottom types respectively.
+///
+///    ```text
+///     extern
+///       |
+///       |
+///       |
+///    noextern
+///    ```
+///
+/// 3. **Internal**
+///
+///    There are also an infinite number of types in the internal type hierarchy
+///    because it contains all concrete `struct` and `array` types that Wasm (or
+///    the embedder) can define. Its top type is `any`. The first subtype of
+///    `any` is `eq`, which represents any type that can be compared for
+///    equality. There are three subtypes of `eq`: `i31`, the abstract `struct`
+///    type, and the abstract `array` type. The abstract `struct` type is the
+///    supertype of all concrete `struct` types that can be defined by Wasm, and
+///    the abstract `array` type plays the same role for `array`s. The internal
+///    type hierarchy's bottom type is `none`.
+///
+///    ```text
+///                      any
+///                       |
+///                       |
+///                       |
+///                      eq
+///                     / | \
+///                    /  |  \
+///       -------------   |   -----------------------------
+///      /                |                                \
+///     /                 |                                 \
+///    i31             struct                              array
+///     |                 |                                  |
+///     |                 |                                  |
+///     |                 |                                  |
+///     |     <all concrete struct types>        <all concrete array types>
+///     \                 |                                  /
+///      \                |                                 /
+///       ------------    |   ------------------------------
+///                   \   |  /
+///                    \  | /
+///                     none
+///    ```
+///
 /// # Subtyping and Equality
 ///
 /// `HeapType` does not implement `Eq`, because heap types have a subtyping
@@ -397,35 +515,99 @@ impl RefType {
 /// between types, you can use the [`HeapType::eq`] method.
 #[derive(Debug, Clone, Hash)]
 pub enum HeapType {
-    /// The `extern` heap type represents external host data.
+    /// The abstract `extern` heap type represents external host data.
+    ///
+    /// This is a supertype of `noextern` and is the top type for the
+    /// `externref` type hierarchy.
     Extern,
 
-    /// The `func` heap type represents a reference to any kind of function.
+    /// The abstract `noextern` heap type represents the null external host
+    /// reference.
     ///
-    /// This is the top type for the function references type hierarchy, and is
-    /// therefore a supertype of every function reference.
+    /// This is a subtype of `extern` and is the bottom type for the external
+    /// type hierarchy.
+    NoExtern,
+
+    /// The abstract `func` heap type represents a reference to any kind of
+    /// function.
+    ///
+    /// This is the top type for the function type hierarchy, and is therefore a
+    /// supertype of every function reference.
     Func,
 
-    /// The concrete heap type represents a reference to a function of a
-    /// specific, concrete type.
+    /// The abstract `nofunc` heap type represents the null function reference.
     ///
-    /// This is a subtype of `func` and a supertype of `nofunc`.
-    Concrete(FuncType),
-
-    /// The `nofunc` heap type represents the null function reference.
-    ///
-    /// This is the bottom type for the function references type hierarchy, and
-    /// therefore `nofunc` is a subtype of all function reference types.
+    /// This is the bottom type for the function type hierarchy, and therefore
+    /// `nofunc` is a subtype of all function types.
     NoFunc,
+
+    /// The abstract `any` heap type represents all internal Wasm data.
+    ///
+    /// This is the top type of the internal type hierarchy, and is therefore a
+    /// supertype of all internal types (such as `i31`, `struct`s, and
+    /// `array`s).
+    Any,
+
+    /// The abstract `eq` heap type represents any internal type that can be
+    /// compared for equality.
+    ///
+    /// This is a subtype of `any` and a supertype of `i31`, `struct`, and
+    /// `array`.
+    Eq,
+
+    /// The abstract `i31` heap type represents a 31-bit integer that is packed
+    /// into a reference.
+    ///
+    /// This is a subtype of `eq` and a supertype of `none`.
+    I31,
+
+    /// The abstract `struct` heap type represents a reference to any kind of
+    /// `struct`.
+    ///
+    /// This is a subtype of `eq` and a supertype of all concrete `struct` types
+    /// defined by Wasm or the embedder.
+    Struct,
+
+    /// The abstract `array` heap type represents a reference to any kind of
+    /// `array`.
+    ///
+    /// This is a subtype of `eq` and a supertype of all concrete `array` types
+    /// defined by Wasm or the embedder.
+    Array,
+
+    /// The abstract `none` heap type represents the null internal reference.
+    ///
+    /// This is the bottom type for the internal type hierarchy, and therefore
+    /// `none` is a subtype of internal types.
+    None,
+
+    /// A specific, concrete type defined by Wasm or the embedder.
+    ///
+    /// If this is a concrete function type, it is a subtype of the abstract
+    /// `func` type and a supertype of `nofunc`.
+    ///
+    /// If this is a concrete `array` type, it is a subtype of the abstract
+    /// `array` type and a supertype of `none`.
+    ///
+    /// If this is a concrete `struct` type, it is a subtype of the abstract
+    /// `struct` type and a supertype of `none`.
+    Concrete(SubType),
 }
 
 impl Display for HeapType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             HeapType::Extern => write!(f, "extern"),
+            HeapType::NoExtern => write!(f, "noextern"),
             HeapType::Func => write!(f, "func"),
             HeapType::NoFunc => write!(f, "nofunc"),
-            HeapType::Concrete(ty) => write!(f, "(concrete {:?})", ty.type_index()),
+            HeapType::Any => write!(f, "any"),
+            HeapType::Eq => write!(f, "eq"),
+            HeapType::I31 => write!(f, "i31"),
+            HeapType::Array => write!(f, "array"),
+            HeapType::Struct => write!(f, "struct"),
+            HeapType::None => write!(f, "none"),
+            HeapType::Concrete(ty) => write!(f, "(concrete {:?})", ty.registered_type.index()),
         }
     }
 }
@@ -433,7 +615,21 @@ impl Display for HeapType {
 impl From<FuncType> for HeapType {
     #[inline]
     fn from(f: FuncType) -> Self {
-        HeapType::Concrete(f)
+        HeapType::Concrete(f.into())
+    }
+}
+
+impl From<ArrayType> for HeapType {
+    #[inline]
+    fn from(a: ArrayType) -> Self {
+        HeapType::Concrete(a.into())
+    }
+}
+
+impl From<StructType> for HeapType {
+    #[inline]
+    fn from(s: StructType) -> Self {
+        HeapType::Concrete(s.into())
     }
 }
 
@@ -470,16 +666,16 @@ impl HeapType {
     /// Get the underlying concrete, user-defined type, if any.
     ///
     /// Returns `None` for abstract types.
-    pub fn as_concrete(&self) -> Option<&FuncType> {
+    pub fn as_concrete(&self) -> Option<&SubType> {
         match self {
-            HeapType::Concrete(f) => Some(f),
+            HeapType::Concrete(x) => Some(x),
             _ => None,
         }
     }
 
     /// Get the underlying concrete, user-defined type, panicking if this heap
     /// type is not concrete.
-    pub fn unwrap_concrete(&self) -> &FuncType {
+    pub fn unwrap_concrete(&self) -> &SubType {
         self.as_concrete()
             .expect("HeapType::unwrap_concrete on non-concrete heap type")
     }
@@ -488,14 +684,18 @@ impl HeapType {
     ///
     /// The returned heap type is a supertype of all types in this heap type's
     /// type hierarchy.
-    pub fn top(&self, engine: &Engine) -> HeapType {
-        // The engine isn't used yet, but will be once we support Wasm GC, so
-        // future-proof our API.
-        let _ = engine;
-
+    pub fn top(&self) -> HeapType {
         match self {
-            HeapType::Func | HeapType::Concrete(_) | HeapType::NoFunc => HeapType::Func,
-            HeapType::Extern => HeapType::Extern,
+            HeapType::Func | HeapType::NoFunc => HeapType::Func,
+            HeapType::Extern | HeapType::NoExtern => HeapType::Extern,
+            HeapType::Any
+            | HeapType::Eq
+            | HeapType::I31
+            | HeapType::Array
+            | HeapType::Struct
+            | HeapType::None => HeapType::Any,
+
+            HeapType::Concrete(_) => todo!("FITZGEN"),
         }
     }
 
@@ -509,18 +709,57 @@ impl HeapType {
     /// other.
     pub fn matches(&self, other: &HeapType) -> bool {
         match (self, other) {
+            // Externals.
+            (HeapType::NoExtern, HeapType::NoExtern | HeapType::Extern) => true,
+            (HeapType::NoExtern, _) => false,
+
             (HeapType::Extern, HeapType::Extern) => true,
             (HeapType::Extern, _) => false,
 
-            (HeapType::NoFunc, HeapType::NoFunc | HeapType::Concrete(_) | HeapType::Func) => true,
+            // Functions.
+            (HeapType::NoFunc, HeapType::NoFunc | HeapType::Func) => true,
             (HeapType::NoFunc, _) => false,
 
-            (HeapType::Concrete(_), HeapType::Func) => true,
-            (HeapType::Concrete(a), HeapType::Concrete(b)) => a.matches(b),
-            (HeapType::Concrete(_), _) => false,
+            (HeapType::Concrete(_), _) | (_, HeapType::Concrete(_)) => todo!("FITZGEN"),
 
+            // (HeapType::ConcreteFunc(_), HeapType::Func) => true,
+            // (HeapType::ConcreteFunc(a), HeapType::ConcreteFunc(b)) => a.matches(b),
+            // (HeapType::ConcreteFunc(_), _) => false,
             (HeapType::Func, HeapType::Func) => true,
             (HeapType::Func, _) => false,
+
+            // Internals.
+            (
+                HeapType::None,
+                HeapType::None
+                | HeapType::Array
+                | HeapType::Struct
+                | HeapType::I31
+                | HeapType::Eq
+                | HeapType::Any,
+            ) => true,
+            (HeapType::None, _) => false,
+
+            // (HeapType::ConcreteArray(_), HeapType::Array | HeapType::Eq | HeapType::Any) => true,
+            // (HeapType::ConcreteArray(a), HeapType::ConcreteArray(b)) => a.matches(b),
+            // (HeapType::ConcreteArray(_), _) => false,
+            (HeapType::Array, HeapType::Array | HeapType::Eq | HeapType::Any) => true,
+            (HeapType::Array, _) => false,
+
+            // (HeapType::ConcreteStruct(_), HeapType::Struct | HeapType::Eq | HeapType::Any) => true,
+            // (HeapType::ConcreteStruct(a), HeapType::ConcreteStruct(b)) => a.matches(b),
+            // (HeapType::ConcreteStruct(_), _) => false,
+            (HeapType::Struct, HeapType::Struct | HeapType::Eq | HeapType::Any) => true,
+            (HeapType::Struct, _) => false,
+
+            (HeapType::I31, HeapType::I31 | HeapType::Eq | HeapType::Any) => true,
+            (HeapType::I31, _) => false,
+
+            (HeapType::Eq, HeapType::Eq | HeapType::Any) => true,
+            (HeapType::Eq, _) => false,
+
+            (HeapType::Any, HeapType::Any) => true,
+            (HeapType::Any, _) => false,
         }
     }
 
@@ -550,7 +789,16 @@ impl HeapType {
 
     pub(crate) fn comes_from_same_engine(&self, engine: &Engine) -> bool {
         match self {
-            HeapType::Extern | HeapType::Func | HeapType::NoFunc => true,
+            HeapType::Extern
+            | HeapType::NoExtern
+            | HeapType::Func
+            | HeapType::NoFunc
+            | HeapType::Any
+            | HeapType::Eq
+            | HeapType::I31
+            | HeapType::Array
+            | HeapType::Struct
+            | HeapType::None => true,
             HeapType::Concrete(ty) => ty.comes_from_same_engine(engine),
         }
     }
@@ -560,9 +808,10 @@ impl HeapType {
             HeapType::Extern => WasmHeapType::Extern,
             HeapType::Func => WasmHeapType::Func,
             HeapType::NoFunc => WasmHeapType::NoFunc,
-            HeapType::Concrete(f) => {
-                WasmHeapType::Concrete(EngineOrModuleTypeIndex::Engine(f.type_index().bits()))
-            }
+            // HeapType::ConcreteFunc(f) => {
+            //     WasmHeapType::Concrete(EngineOrModuleTypeIndex::Engine(f.type_index().bits()))
+            // }
+            _ => todo!("FITZGEN"),
         }
     }
 
@@ -573,7 +822,7 @@ impl HeapType {
             WasmHeapType::NoFunc => HeapType::NoFunc,
             WasmHeapType::Concrete(EngineOrModuleTypeIndex::Engine(idx)) => {
                 let idx = VMSharedTypeIndex::new(*idx);
-                HeapType::Concrete(FuncType::from_shared_type_index(engine, idx))
+                HeapType::Concrete(FuncType::from_shared_type_index(engine, idx).into())
             }
             WasmHeapType::Concrete(EngineOrModuleTypeIndex::Module(_)) => {
                 panic!("HeapType::from_wasm_type on non-canonical heap type")
@@ -882,6 +1131,334 @@ impl FuncType {
         Self {
             registered_type: ty,
         }
+    }
+}
+
+/// The type of storage in a `struct` or `array` type field.
+#[derive(Clone, Hash)]
+pub enum StorageType {
+    /// A single byte: `i8`.
+    I8,
+    /// A two-byte integer: `i16`.
+    I16,
+    /// The given value type.
+    Val(ValType),
+}
+
+impl StorageType {
+    /// TODO FITZGEN
+    pub fn is_i8(&self) -> bool {
+        matches!(self, Self::I8)
+    }
+
+    /// TODO FITZGEN
+    pub fn is_i16(&self) -> bool {
+        matches!(self, Self::I16)
+    }
+
+    /// TODO FITZGEN
+    pub fn is_val_type(&self) -> bool {
+        matches!(self, Self::Val(_))
+    }
+
+    /// TODO FITZGEN
+    pub fn as_val_type(&self) -> Option<&ValType> {
+        match self {
+            Self::Val(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    /// TODO FITZGEN
+    pub fn unwrap_val_type(&self) -> &ValType {
+        self.as_val_type()
+            .expect("StorageType::unwrap_val_type on non-ValType storage type")
+    }
+}
+
+/// TODO FITZGEN
+#[derive(Clone, Hash)]
+pub struct FieldType {
+    storage_type: StorageType,
+    mutability: Mutability,
+}
+
+impl FieldType {
+    /// TODO FITZGEN
+    pub fn mutability(&self) -> Mutability {
+        self.mutability
+    }
+
+    /// TODO FITZGEN
+    pub fn storage_type(&self) -> &StorageType {
+        &self.storage_type
+    }
+}
+
+/// TODO FITZGEN
+#[derive(Debug, Clone, Hash)]
+pub struct ArrayType {
+    registered_type: RegisteredType,
+}
+
+impl TryFrom<SubType> for ArrayType {
+    type Error = Error;
+
+    fn try_from(ty: SubType) -> Result<Self, Self::Error> {
+        ensure!(ty.is_array_type(), "cannot convert {ty} into an ArrayType");
+        Ok(ArrayType {
+            registered_type: ty.into_registered_type(),
+        })
+    }
+}
+
+impl ArrayType {
+    /// Get the engine that this function type is associated with.
+    pub fn engine(&self) -> &Engine {
+        self.registered_type.engine()
+    }
+
+    /// TODO FITZGEN
+    pub fn matches(&self, other: &SubType) -> bool {
+        assert!(self.comes_from_same_engine(other.engine()));
+        todo!("FITZGEN")
+    }
+
+    /// TODO FITZGEN
+    pub fn eq(a: &SubType, b: &SubType) -> bool {
+        assert!(a.comes_from_same_engine(b.engine()));
+        a.registered_type.index() == b.registered_type.index()
+    }
+
+    pub(crate) fn into_registered_type(self) -> RegisteredType {
+        self.registered_type
+    }
+
+    pub(crate) fn comes_from_same_engine(&self, engine: &Engine) -> bool {
+        Engine::same(self.registered_type.engine(), engine)
+    }
+}
+
+/// TODO FITZGEN
+#[derive(Clone, Hash)]
+pub struct StructType {
+    registered_type: RegisteredType,
+}
+
+impl StructType {
+    /// Get the engine that this function type is associated with.
+    pub fn engine(&self) -> &Engine {
+        self.registered_type.engine()
+    }
+
+    /// TODO FITZGEN
+    pub fn matches(&self, other: &SubType) -> bool {
+        assert!(self.comes_from_same_engine(other.engine()));
+        todo!("FITZGEN")
+    }
+
+    /// TODO FITZGEN
+    pub fn eq(a: &SubType, b: &SubType) -> bool {
+        assert!(a.comes_from_same_engine(b.engine()));
+        a.registered_type.index() == b.registered_type.index()
+    }
+
+    /// TODO FITZGEN
+    pub fn field(&self, index: u32) -> FieldType {
+        let _ = index;
+        todo!("FITZGEN")
+    }
+
+    /// TODO FITZGEN
+    pub fn fields(&self) -> impl ExactSizeIterator<Item = FieldType> {
+        if true {
+            todo!("FITZGEN");
+        }
+        vec![].into_iter()
+    }
+
+    pub(crate) fn into_registered_type(self) -> RegisteredType {
+        self.registered_type
+    }
+
+    pub(crate) fn comes_from_same_engine(&self, engine: &Engine) -> bool {
+        Engine::same(self.registered_type.engine(), engine)
+    }
+}
+
+/// TODO FITZGEN
+#[derive(Clone, Hash)]
+pub enum CompositeType {
+    /// TODO FITZGEN
+    Func(FuncType),
+
+    /// TODO FITZGEN
+    Struct(StructType),
+
+    /// TODO FITZGEN
+    Array(ArrayType),
+}
+
+impl CompositeType {
+    /// Get the engine that this function type is associated with.
+    pub fn engine(&self) -> &Engine {
+        self.registered_type().engine()
+    }
+
+    /// TODO FITZGEN
+    pub fn matches(&self, other: &CompositeType) -> bool {
+        assert!(self.comes_from_same_engine(other.engine()));
+        todo!("FITZGEN")
+    }
+
+    /// TODO FITZGEN
+    pub fn eq(a: &CompositeType, b: &CompositeType) -> bool {
+        assert!(a.comes_from_same_engine(b.engine()));
+        a.registered_type().index() == b.registered_type().index()
+    }
+
+    pub(crate) fn registered_type(&self) -> &RegisteredType {
+        match self {
+            CompositeType::Func(x) => &x.registered_type,
+            CompositeType::Array(x) => &x.registered_type,
+            CompositeType::Struct(x) => &x.registered_type,
+        }
+    }
+
+    pub(crate) fn comes_from_same_engine(&self, engine: &Engine) -> bool {
+        Engine::same(self.registered_type().engine(), engine)
+    }
+}
+
+/// TODO FITZGEN
+#[derive(Clone, Hash)]
+pub struct SubType {
+    registered_type: RegisteredType,
+}
+
+impl From<ArrayType> for SubType {
+    #[inline]
+    fn from(ty: ArrayType) -> Self {
+        SubType {
+            registered_type: ty.into_registered_type(),
+        }
+    }
+}
+
+impl From<FuncType> for SubType {
+    #[inline]
+    fn from(ty: FuncType) -> Self {
+        SubType {
+            registered_type: ty.into_registered_type(),
+        }
+    }
+}
+
+impl From<StructType> for SubType {
+    #[inline]
+    fn from(ty: StructType) -> Self {
+        SubType {
+            registered_type: ty.into_registered_type(),
+        }
+    }
+}
+
+impl Display for SubType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let _ = f;
+        todo!("FITZGEN");
+    }
+}
+
+impl Debug for SubType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let _ = f;
+        todo!("FITZGEN");
+    }
+}
+
+impl SubType {
+    /// TODO FITZGEN
+    pub fn supertype(&self) -> Option<SubType> {
+        todo!("FITZGEN")
+    }
+
+    /// TODO FITZGEN
+    pub fn composite_type(&self) -> CompositeType {
+        todo!("FITZGEN")
+    }
+
+    /// TODO FITZGEN
+    pub fn is_func_type(&self) -> bool {
+        todo!("FITZGEN")
+    }
+
+    /// TODO FITZGEN
+    pub fn as_func_type(&self) -> Option<FuncType> {
+        todo!("FITZGEN")
+    }
+
+    /// TODO FITZGEN
+    pub fn unwrap_func_type(&self) -> FuncType {
+        self.as_func_type()
+            .expect("SubType::unwrap_func on non-function subtype")
+    }
+
+    /// TODO FITZGEN
+    pub fn is_array_type(&self) -> bool {
+        todo!("FITZGEN")
+    }
+
+    /// TODO FITZGEN
+    pub fn as_array_type(&self) -> Option<ArrayType> {
+        todo!("FITZGEN")
+    }
+
+    /// TODO FITZGEN
+    pub fn unwrap_array_type(&self) -> ArrayType {
+        self.as_array_type()
+            .expect("SubType::unwrap_array on non-array subtype")
+    }
+
+    /// TODO FITZGEN
+    pub fn is_struct_type(&self) -> bool {
+        todo!("FITZGEN")
+    }
+
+    /// TODO FITZGEN
+    pub fn as_struct_type(&self) -> Option<StructType> {
+        todo!("FITZGEN")
+    }
+
+    /// TODO FITZGEN
+    pub fn unwrap_struct_type(&self) -> StructType {
+        self.as_struct_type()
+            .expect("SubType::unwrap_struct on non-struct subtype")
+    }
+
+    /// Get the engine that this function type is associated with.
+    pub fn engine(&self) -> &Engine {
+        self.registered_type.engine()
+    }
+
+    /// TODO FITZGEN
+    pub fn matches(&self, other: &SubType) -> bool {
+        assert!(self.comes_from_same_engine(other.engine()));
+        todo!("FITZGEN")
+    }
+
+    /// TODO FITZGEN
+    pub fn eq(a: &SubType, b: &SubType) -> bool {
+        assert!(a.comes_from_same_engine(b.engine()));
+        a.registered_type.index() == b.registered_type.index()
+    }
+
+    pub(crate) fn into_registered_type(self) -> RegisteredType {
+        self.registered_type
+    }
+
+    pub(crate) fn comes_from_same_engine(&self, engine: &Engine) -> bool {
+        Engine::same(self.registered_type.engine(), engine)
     }
 }
 

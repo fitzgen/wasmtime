@@ -5,6 +5,10 @@ use std::any::Any;
 use std::ffi::c_void;
 use wasmtime_runtime::VMExternRef;
 
+/// TODO FITZGEN
+#[derive(Clone, Debug)]
+pub struct AnyRef {}
+
 /// Represents an opaque reference to any data within WebAssembly.
 #[derive(Clone, Debug)]
 #[repr(transparent)]

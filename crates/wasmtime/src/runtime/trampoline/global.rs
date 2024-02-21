@@ -21,7 +21,18 @@ impl Drop for VMHostGlobalContext {
             }
             crate::ValType::Ref(r) => match r.heap_type() {
                 HeapType::Extern => unsafe { ptr::drop_in_place(self.global.as_externref_mut()) },
-                HeapType::Func | HeapType::Concrete(_) | HeapType::NoFunc => {
+
+                HeapType::Any
+                | HeapType::Eq
+                | HeapType::Struct
+                | HeapType::Array
+                | HeapType::Concrete(_) => todo!("FITZGEN"),
+
+                HeapType::Func
+                | HeapType::I31
+                | HeapType::NoFunc
+                | HeapType::NoExtern
+                | HeapType::None => {
                     // Nothing to drop.
                 }
             },
@@ -61,6 +72,7 @@ pub fn generate_global_export(
             Val::ExternRef(x) => {
                 *global.as_externref_mut() = x.map(|x| x.inner);
             }
+            Val::AnyRef(_) => todo!("FITZGEN"),
         }
         global
     };

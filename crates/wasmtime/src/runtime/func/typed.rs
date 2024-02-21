@@ -2,7 +2,7 @@ use super::{invoke_wasm_and_catch_traps, HostAbi};
 use crate::store::{AutoAssertNoGc, StoreOpaque};
 use crate::{
     AsContext, AsContextMut, Engine, ExternRef, Func, FuncType, HeapType, NoFunc, RefType,
-    StoreContextMut, ValRaw, ValType,
+    StoreContextMut, SubType, ValRaw, ValType,
 };
 use anyhow::{bail, Context, Result};
 use std::marker;
@@ -279,8 +279,8 @@ pub unsafe trait WasmTy: Send {
                 (Some(expected_ref), Some(actual_ref)) if actual_ref.heap_type().is_concrete() => {
                     expected_ref
                         .heap_type()
-                        .top(engine)
-                        .ensure_matches(engine, &actual_ref.heap_type().top(engine))
+                        .top()
+                        .ensure_matches(engine, &actual_ref.heap_type().top())
                 }
                 _ => expected.ensure_matches(engine, &actual),
             },
@@ -307,7 +307,7 @@ pub unsafe trait WasmTy: Send {
         &self,
         store: &StoreOpaque,
         nullable: bool,
-        actual: &FuncType,
+        actual: &SubType,
     ) -> Result<()>;
 
     // Is this an externref?
@@ -344,7 +344,7 @@ macro_rules! integers {
                 true
             }
             #[inline]
-            fn dynamic_concrete_type_check(&self, _: &StoreOpaque, _: bool, _: &FuncType) -> Result<()> {
+            fn dynamic_concrete_type_check(&self, _: &StoreOpaque, _: bool, _: &SubType) -> Result<()> {
                 unreachable!()
             }
             #[inline]
@@ -391,7 +391,7 @@ macro_rules! floats {
                 true
             }
             #[inline]
-            fn dynamic_concrete_type_check(&self, _: &StoreOpaque, _: bool, _: &FuncType) -> Result<()> {
+            fn dynamic_concrete_type_check(&self, _: &StoreOpaque, _: bool, _: &SubType) -> Result<()> {
                 unreachable!()
             }
             #[inline]
@@ -437,7 +437,7 @@ unsafe impl WasmTy for ExternRef {
     }
 
     #[inline]
-    fn dynamic_concrete_type_check(&self, _: &StoreOpaque, _: bool, _: &FuncType) -> Result<()> {
+    fn dynamic_concrete_type_check(&self, _: &StoreOpaque, _: bool, _: &SubType) -> Result<()> {
         unreachable!()
     }
 
@@ -520,7 +520,7 @@ unsafe impl WasmTy for Option<ExternRef> {
     }
 
     #[inline]
-    fn dynamic_concrete_type_check(&self, _: &StoreOpaque, _: bool, _: &FuncType) -> Result<()> {
+    fn dynamic_concrete_type_check(&self, _: &StoreOpaque, _: bool, _: &SubType) -> Result<()> {
         unreachable!()
     }
 
@@ -574,7 +574,7 @@ unsafe impl WasmTy for NoFunc {
     }
 
     #[inline]
-    fn dynamic_concrete_type_check(&self, _: &StoreOpaque, _: bool, _: &FuncType) -> Result<()> {
+    fn dynamic_concrete_type_check(&self, _: &StoreOpaque, _: bool, _: &SubType) -> Result<()> {
         match self._inner {}
     }
 
@@ -622,13 +622,14 @@ unsafe impl WasmTy for Option<NoFunc> {
         &self,
         _: &StoreOpaque,
         nullable: bool,
-        func_ty: &FuncType,
+        expected: &SubType,
     ) -> Result<()> {
+        debug_assert!(expected.is_func_type());
         if nullable {
             // `(ref null nofunc) <: (ref null $f)` for all function types `$f`.
             Ok(())
         } else {
-            bail!("argument type mismatch: expected (ref {func_ty}), found null reference")
+            bail!("argument type mismatch: expected (ref {expected}), found null reference")
         }
     }
 
@@ -676,9 +677,10 @@ unsafe impl WasmTy for Func {
         &self,
         store: &StoreOpaque,
         _nullable: bool,
-        actual: &FuncType,
+        expected: &SubType,
     ) -> Result<()> {
-        self.ensure_matches_ty(store, actual)
+        let func_ty = expected.unwrap_func_type();
+        self.ensure_matches_ty(store, &func_ty)
             .context("argument type mismatch for reference to concrete type")
     }
 
@@ -731,15 +733,16 @@ unsafe impl WasmTy for Option<Func> {
         &self,
         store: &StoreOpaque,
         nullable: bool,
-        func_ty: &FuncType,
+        expected: &SubType,
     ) -> Result<()> {
         if let Some(f) = self {
-            f.ensure_matches_ty(store, func_ty)
+            let func_ty = expected.unwrap_func_type();
+            f.ensure_matches_ty(store, &func_ty)
                 .context("argument type mismatch for reference to concrete type")
         } else if nullable {
             Ok(())
         } else {
-            bail!("argument type mismatch: expected (ref {func_ty}), found null reference")
+            bail!("argument type mismatch: expected (ref {expected}), found null reference")
         }
     }
 

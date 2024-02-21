@@ -344,10 +344,22 @@ impl<T> Linker<T> {
                                     ValType::Ref(r) => {
                                         debug_assert!(r.is_nullable());
                                         match r.heap_type() {
-                                            HeapType::Func
-                                            | HeapType::Concrete(_)
-                                            | HeapType::NoFunc => Val::null_func_ref(),
-                                            HeapType::Extern => Val::null_extern_ref(),
+                                            HeapType::Extern | HeapType::NoExtern => {
+                                                Val::null_extern_ref()
+                                            }
+
+                                            HeapType::Func | HeapType::NoFunc => {
+                                                Val::null_func_ref()
+                                            }
+
+                                            HeapType::Any
+                                            | HeapType::Eq
+                                            | HeapType::I31
+                                            | HeapType::Array
+                                            | HeapType::Struct
+                                            | HeapType::None => Val::null_any_ref(),
+
+                                            HeapType::Concrete(_) => todo!("FITZGEN"),
                                         }
                                     }
                                 };

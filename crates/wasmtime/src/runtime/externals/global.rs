@@ -116,10 +116,21 @@ impl Global {
                                 .clone()
                                 .map(|inner| ExternRef { inner }),
                         ),
-                        HeapType::Func | HeapType::Concrete(_) => {
+                        HeapType::NoExtern => Ref::Extern(None),
+
+                        HeapType::Func => {
                             Ref::Func(Func::from_raw(store, definition.as_func_ref().cast()))
                         }
                         HeapType::NoFunc => Ref::Func(None),
+
+                        HeapType::Any
+                        | HeapType::Eq
+                        | HeapType::I31
+                        | HeapType::Array
+                        | HeapType::Struct
+                        | HeapType::Concrete(_) => todo!("FITZGEN"),
+
+                        HeapType::None => Ref::Any(None),
                     };
                     debug_assert!(
                         ref_ty.is_nullable() || !reference.is_null(),
@@ -168,6 +179,7 @@ impl Global {
                     let old = mem::replace(definition.as_externref_mut(), e.map(|e| e.inner));
                     drop(old);
                 }
+                Val::AnyRef(_) => todo!("FITZGEN"),
             }
         }
         Ok(())

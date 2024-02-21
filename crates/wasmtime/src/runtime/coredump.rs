@@ -1,8 +1,8 @@
 use std::{collections::HashMap, fmt};
 
 use crate::{
-    store::StoreOpaque, AsContextMut, FrameInfo, Global, HeapType, Instance, Memory, Module,
-    StoreContextMut, Val, ValType, WasmBacktrace,
+    store::StoreOpaque, AsContextMut, CompositeType, FrameInfo, Global, HeapType, Instance, Memory,
+    Module, StoreContextMut, Val, ValType, WasmBacktrace,
 };
 
 /// Representation of a core dump of a WebAssembly module
@@ -161,23 +161,48 @@ impl WasmCoreDump {
                 global_to_idx.insert(g.hash_key(&store.0), globals.len());
                 let ty = g.ty(&store);
                 let mutable = matches!(ty.mutability(), crate::Mutability::Var);
+
                 let val_type = match ty.content() {
                     ValType::I32 => wasm_encoder::ValType::I32,
                     ValType::I64 => wasm_encoder::ValType::I64,
                     ValType::F32 => wasm_encoder::ValType::F32,
                     ValType::F64 => wasm_encoder::ValType::F64,
                     ValType::V128 => wasm_encoder::ValType::V128,
-                    ValType::Ref(r) => match r.heap_type() {
-                        HeapType::Extern => wasm_encoder::ValType::EXTERNREF,
+                    ValType::Ref(r) => {
+                        // We encode all references as null in the core dump
+                        // because the format doesn't have a way of encoding
+                        // reference values yet.
+                        let nullable = true;
 
-                        // We encode all function references as null in the core
-                        // dump, so choose the common super type of all the
-                        // actual function reference types.
-                        HeapType::Func | HeapType::Concrete(_) | HeapType::NoFunc => {
-                            wasm_encoder::ValType::FUNCREF
-                        }
-                    },
+                        let heap_type = match r.heap_type().top() {
+                            HeapType::Extern => wasm_encoder::HeapType::Extern,
+                            HeapType::NoExtern => wasm_encoder::HeapType::NoExtern,
+                            HeapType::Func => wasm_encoder::HeapType::Func,
+                            HeapType::NoFunc => wasm_encoder::HeapType::NoFunc,
+                            HeapType::Any => wasm_encoder::HeapType::Any,
+                            HeapType::Eq => wasm_encoder::HeapType::Eq,
+                            HeapType::I31 => wasm_encoder::HeapType::I31,
+                            HeapType::Struct => wasm_encoder::HeapType::Struct,
+                            HeapType::Array => wasm_encoder::HeapType::Array,
+                            HeapType::None => wasm_encoder::HeapType::None,
+
+                            // Don't attempt to precisely encode concrete types,
+                            // just use the next supertype, since we aren't even
+                            // encoding the reference values anyways.
+                            HeapType::Concrete(ty) => match ty.composite_type() {
+                                CompositeType::Array(_) => wasm_encoder::HeapType::Array,
+                                CompositeType::Struct(_) => wasm_encoder::HeapType::Struct,
+                                CompositeType::Func(_) => wasm_encoder::HeapType::Func,
+                            },
+                        };
+
+                        wasm_encoder::ValType::Ref(wasm_encoder::RefType {
+                            nullable,
+                            heap_type,
+                        })
+                    }
                 };
+
                 let init = match g.get(&mut store) {
                     Val::I32(x) => wasm_encoder::ConstExpr::i32_const(x),
                     Val::I64(x) => wasm_encoder::ConstExpr::i64_const(x),
@@ -194,6 +219,12 @@ impl WasmCoreDump {
                     Val::ExternRef(_) => {
                         wasm_encoder::ConstExpr::ref_null(wasm_encoder::HeapType::Extern)
                     }
+                    Val::AnyRef(_) => wasm_encoder::ConstExpr::ref_null(match val_type {
+                        wasm_encoder::ValType::Ref(wasm_encoder::RefType { heap_type, .. }) => {
+                            heap_type
+                        }
+                        _ => unreachable!(),
+                    }),
                 };
                 globals.global(wasm_encoder::GlobalType { val_type, mutable }, &init);
             }

@@ -1,4 +1,4 @@
-use crate::r#ref::ExternRef;
+use crate::r#ref::{AnyRef, ExternRef};
 use crate::store::StoreOpaque;
 use crate::{AsContext, AsContextMut, Func, HeapType, RefType, ValType, V128};
 use anyhow::{bail, Context, Result};
@@ -43,6 +43,9 @@ pub enum Val {
 
     /// An external reference.
     ExternRef(Option<ExternRef>),
+
+    /// An internal reference.
+    AnyRef(Option<AnyRef>),
 }
 
 macro_rules! accessors {
@@ -81,13 +84,22 @@ impl Val {
         Val::FuncRef(None)
     }
 
-    /// Returns the null function reference value.
+    /// Returns the null external reference value.
     ///
     /// The return value has type `(ref null extern)` aka `nullexternref` and is
     /// a subtype of all external references.
     #[inline]
     pub const fn null_extern_ref() -> Val {
         Val::ExternRef(None)
+    }
+
+    /// Returns the null internal reference value.
+    ///
+    /// The return value has type `(ref null none)` aka `nullref` and is a
+    /// subtype of all internal references.
+    #[inline]
+    pub const fn null_any_ref() -> Val {
+        Val::AnyRef(None)
     }
 
     /// Returns the corresponding [`ValType`] for this `Val`.
@@ -106,9 +118,13 @@ impl Val {
             Val::V128(_) => ValType::V128,
             Val::ExternRef(_) => ValType::EXTERNREF,
             Val::FuncRef(None) => ValType::NULLFUNCREF,
-            Val::FuncRef(Some(f)) => {
-                ValType::Ref(RefType::new(false, HeapType::Concrete(f.load_ty(store))))
-            }
+            Val::FuncRef(Some(f)) => ValType::Ref(RefType::new(
+                false,
+                HeapType::Concrete(f.load_ty(store).into()),
+            )),
+            Val::AnyRef(None) => ValType::NULLREF,
+            #[allow(unreachable_code)] // TODO FITZGEN
+            Val::AnyRef(Some(_)) => ValType::Ref(RefType::new(false, todo!("FITZGEN"))),
         }
     }
 
@@ -137,6 +153,9 @@ impl Val {
             (Val::ExternRef(e), ValType::Ref(ref_ty)) => {
                 Ref::from(e.clone())._matches_ty(store, ref_ty)
             }
+            (Val::AnyRef(x), ValType::Ref(ref_ty)) => {
+                Ref::from(x.clone())._matches_ty(store, ref_ty)
+            }
 
             (Val::I32(_), _)
             | (Val::I64(_), _)
@@ -144,7 +163,8 @@ impl Val {
             | (Val::F64(_), _)
             | (Val::V128(_), _)
             | (Val::FuncRef(_), _)
-            | (Val::ExternRef(_), _) => false,
+            | (Val::ExternRef(_), _)
+            | (Val::AnyRef(_), _) => false,
         }
     }
 
@@ -190,6 +210,7 @@ impl Val {
                 };
                 ValRaw::funcref(funcref)
             }
+            Val::AnyRef(_) => todo!("FITZGEN"),
         }
     }
 
@@ -210,10 +231,10 @@ impl Val {
             ValType::Ref(ref_ty) => {
                 let ref_ = match ref_ty.heap_type() {
                     HeapType::Extern => ExternRef::from_raw(raw.get_externref()).into(),
-                    HeapType::Func | HeapType::Concrete(_) => {
-                        Func::from_raw(store, raw.get_funcref()).into()
-                    }
+                    HeapType::Func => Func::from_raw(store, raw.get_funcref()).into(),
                     HeapType::NoFunc => Ref::Func(None),
+
+                    _ => todo!("FITZGEN"),
                 };
                 assert!(
                     ref_ty.is_nullable() || !ref_.is_null(),
@@ -239,6 +260,7 @@ impl Val {
     #[inline]
     pub fn ref_(self) -> Option<Ref> {
         match self {
+            Val::AnyRef(x) => Some(Ref::Any(x)),
             Val::FuncRef(f) => Some(Ref::Func(f)),
             Val::ExternRef(e) => Some(Ref::Extern(e)),
             Val::I32(_) | Val::I64(_) | Val::F32(_) | Val::F64(_) | Val::V128(_) => None,
@@ -313,6 +335,9 @@ impl Val {
             Val::FuncRef(Some(f)) => f.comes_from_same_store(store),
             Val::FuncRef(None) => true,
 
+            Val::AnyRef(Some(_x)) => todo!("FITZGEN"),
+            Val::AnyRef(None) => true,
+
             // Integers, floats, vectors, and `externref`s have no association
             // with any particular store, so they're always considered as "yes I
             // came from that store",
@@ -358,6 +383,7 @@ impl From<Ref> for Val {
     #[inline]
     fn from(val: Ref) -> Val {
         match val {
+            Ref::Any(x) => Val::AnyRef(x),
             Ref::Extern(e) => Val::ExternRef(e),
             Ref::Func(f) => Val::FuncRef(f),
         }
@@ -480,6 +506,9 @@ pub enum Ref {
     /// Wasm can create null external references via the `ref.null extern`
     /// instruction.
     Extern(Option<ExternRef>),
+
+    /// TODO FITZGEN
+    Any(Option<AnyRef>),
 }
 
 impl From<Func> for Ref {
@@ -510,13 +539,27 @@ impl From<Option<ExternRef>> for Ref {
     }
 }
 
+impl From<AnyRef> for Ref {
+    #[inline]
+    fn from(e: AnyRef) -> Ref {
+        Ref::Any(Some(e))
+    }
+}
+
+impl From<Option<AnyRef>> for Ref {
+    #[inline]
+    fn from(e: Option<AnyRef>) -> Ref {
+        Ref::Any(e)
+    }
+}
+
 impl Ref {
     /// Is this a null reference?
     #[inline]
     pub fn is_null(&self) -> bool {
         match self {
-            Ref::Extern(None) | Ref::Func(None) => true,
-            Ref::Extern(Some(_)) | Ref::Func(Some(_)) => false,
+            Ref::Any(None) | Ref::Extern(None) | Ref::Func(None) => true,
+            Ref::Any(Some(_)) | Ref::Extern(Some(_)) | Ref::Func(Some(_)) => false,
         }
     }
 
@@ -606,15 +649,20 @@ impl Ref {
     pub(crate) fn load_ty(&self, store: &StoreOpaque) -> RefType {
         assert!(self.comes_from_same_store(store));
         RefType::new(
-            false,
+            self.is_null(),
             match self {
-                Ref::Extern(_) => HeapType::Extern,
+                Ref::Extern(Some(_)) => HeapType::Extern,
+                Ref::Extern(None) => HeapType::NoExtern,
 
                 // NB: We choose the most-specific heap type we can here and let
                 // subtyping do its thing if callers are matching against a
                 // `HeapType::Func`.
-                Ref::Func(Some(f)) => HeapType::Concrete(f.load_ty(store)),
+                Ref::Func(Some(f)) => HeapType::Concrete(f.load_ty(store).into()),
                 Ref::Func(None) => HeapType::NoFunc,
+
+                #[allow(unreachable_code)] // FITZGEN
+                Ref::Any(Some(_x)) => HeapType::Concrete(todo!("FITZGEN")),
+                Ref::Any(None) => HeapType::None,
             },
         )
     }
@@ -637,10 +685,25 @@ impl Ref {
         match (self, ty.heap_type()) {
             (Ref::Extern(_), HeapType::Extern) => true,
             (Ref::Extern(_), _) => false,
+
             (Ref::Func(_), HeapType::Func | HeapType::NoFunc) => true,
-            (Ref::Func(None), HeapType::Concrete(_)) => true,
-            (Ref::Func(Some(f)), HeapType::Concrete(func_ty)) => f._matches_ty(store, func_ty),
+            (Ref::Func(None), HeapType::Concrete(c)) if c.is_func_type() => true,
+            (Ref::Func(Some(f)), HeapType::Concrete(c)) => c
+                .as_func_type()
+                .map_or(false, |ty| f._matches_ty(store, &ty)),
             (Ref::Func(_), _) => false,
+
+            (Ref::Any(_), HeapType::Any) => true,
+            (
+                Ref::Any(None),
+                HeapType::Eq | HeapType::I31 | HeapType::Struct | HeapType::Array | HeapType::None,
+            ) => true,
+            (Ref::Any(None), HeapType::Concrete(c)) => c.is_array_type() || c.is_struct_type(),
+            (Ref::Any(Some(_x)), HeapType::Eq) => todo!("FITZGEN: not a wrapped extern ref"),
+            (Ref::Any(Some(_x)), HeapType::I31) => todo!("FITZGEN: is an i31ref"),
+            (Ref::Any(Some(_x)), HeapType::Struct) => todo!("FITZGEN: is a struct ref"),
+            (Ref::Any(Some(_x)), HeapType::Array) => todo!("FITZGEN: is an array ref"),
+            (Ref::Any(_), _) => false,
         }
     }
 
@@ -664,6 +727,9 @@ impl Ref {
             Ref::Func(Some(f)) => f.comes_from_same_store(store),
             Ref::Func(None) => true,
 
+            Ref::Any(Some(_x)) => todo!("FITZGEN"),
+            Ref::Any(None) => true,
+
             // `ExternRef`s aren't associated with any single store right
             // now. That may change in the future.
             Ref::Extern(_) => true,
@@ -677,26 +743,18 @@ impl Ref {
     ) -> Result<TableElement> {
         self.ensure_matches_ty(store, &ty)
             .context("type mismatch: value does not match table element type")?;
-        match (self, ty.heap_type()) {
-            (Ref::Func(None), HeapType::NoFunc | HeapType::Func | HeapType::Concrete(_)) => {
-                assert!(ty.is_nullable());
-                Ok(TableElement::FuncRef(ptr::null_mut()))
-            }
-            (Ref::Func(Some(f)), HeapType::Func | HeapType::Concrete(_)) => {
+        match self {
+            Ref::Func(f) => Ok(TableElement::FuncRef(f.map_or(ptr::null_mut(), |f| {
                 debug_assert!(
                     f.comes_from_same_store(store),
                     "checked in `ensure_matches_ty`"
                 );
-                Ok(TableElement::FuncRef(f.vm_func_ref(store).as_ptr()))
-            }
-            (Ref::Extern(e), HeapType::Extern) => match e {
-                None => {
-                    assert!(ty.is_nullable());
-                    Ok(TableElement::ExternRef(None))
-                }
-                Some(e) => Ok(TableElement::ExternRef(Some(e.inner))),
-            },
-            _ => unreachable!("checked that the value matches the type above"),
+                f.vm_func_ref(store).as_ptr()
+            }))),
+
+            Ref::Extern(e) => Ok(TableElement::ExternRef(e.map(|e| e.inner))),
+
+            Ref::Any(_x) => todo!("FITZGEN"),
         }
     }
 }
@@ -747,7 +805,7 @@ mod tests {
         // Should panic.
         let _ = Val::FuncRef(Some(f)).matches_ty(
             &s1,
-            &ValType::Ref(RefType::new(true, HeapType::Concrete(t2))),
+            &ValType::Ref(RefType::new(true, HeapType::ConcreteFunc(t2))),
         );
     }
 
@@ -764,6 +822,6 @@ mod tests {
         let f = Func::new(&mut s1, t1.clone(), |_caller, _args, _results| Ok(()));
 
         // Should panic.
-        let _ = Ref::Func(Some(f)).matches_ty(&s1, &RefType::new(true, HeapType::Concrete(t2)));
+        let _ = Ref::Func(Some(f)).matches_ty(&s1, &RefType::new(true, HeapType::ConcreteFunc(t2)));
     }
 }
