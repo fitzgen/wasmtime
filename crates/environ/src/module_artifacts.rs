@@ -111,6 +111,9 @@ pub struct Metadata {
     /// weren't found in the original wasm module itself.
     pub has_wasm_debuginfo: bool,
 
+    /// TODO FITZGEN
+    pub is_pulley: bool,
+
     /// Dwarf sections and the offsets at which they're stored in the
     /// ELF_WASMTIME_DWARF
     pub dwarf: Vec<(u8, Range<u64>)>,

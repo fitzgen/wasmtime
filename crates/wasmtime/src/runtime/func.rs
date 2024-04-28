@@ -1,11 +1,12 @@
 use crate::prelude::*;
 use crate::runtime::vm::{
-    ExportFunction, SendSyncPtr, StoreBox, VMArrayCallHostFuncContext, VMContext, VMFuncRef,
-    VMFunctionImport, VMNativeCallHostFuncContext, VMOpaqueContext,
+    ExportFunction, SendSyncPtr, StoreBox, UnpackedFuncRefPayload, VMArrayCallHostFuncContext,
+    VMContext, VMFuncRef, VMFunctionImport, VMNativeCallHostFuncContext, VMOpaqueContext,
 };
 use crate::runtime::Uninhabited;
 use crate::store::{AutoAssertNoGc, StoreData, StoreOpaque, Stored};
 use crate::type_registry::RegisteredType;
+use crate::vm::VMFuncRefTrampolines;
 use crate::{
     AsContext, AsContextMut, CallHook, Engine, Extern, FuncType, Instance, Module, Ref,
     StoreContext, StoreContextMut, Val, ValRaw, ValType,
@@ -1046,12 +1047,17 @@ impl Func {
     ) -> Result<()> {
         invoke_wasm_and_catch_traps(store, |caller| {
             let func_ref = func_ref.as_ref();
-            (func_ref.array_call)(
-                func_ref.vmctx,
-                caller.cast::<VMOpaqueContext>(),
-                params_and_returns,
-                params_and_returns_capacity,
-            )
+            match func_ref.payload.unpack() {
+                UnpackedFuncRefPayload::Trampolines(trampolines) => (trampolines.array_call)(
+                    func_ref.vmctx,
+                    caller.cast::<VMOpaqueContext>(),
+                    params_and_returns,
+                    params_and_returns_capacity,
+                ),
+                UnpackedFuncRefPayload::Interpreter(int) => {
+                    todo!("FITZGEN: call into the interpreter!")
+                }
+            }
         })
     }
 
@@ -1240,7 +1246,13 @@ impl Func {
     pub(crate) fn vm_func_ref(&self, store: &mut StoreOpaque) -> NonNull<VMFuncRef> {
         let func_data = &mut store.store_data_mut()[self.0];
         let func_ref = func_data.export().func_ref;
-        if unsafe { func_ref.as_ref().wasm_call.is_some() } {
+        if unsafe {
+            let func_ref = func_ref.as_ref();
+            match func_ref.payload.unpack() {
+                UnpackedFuncRefPayload::Trampolines(tramps) => tramps.wasm_call.is_some(),
+                UnpackedFuncRefPayload::Interpreter(_) => true,
+            }
+        } {
             return func_ref;
         }
 
@@ -1288,29 +1300,38 @@ impl Func {
                 // copy in the store, use the patched version. Otherwise, use
                 // the potentially un-patched version.
                 if let Some(func_ref) = func_data.in_store_func_ref {
-                    func_ref.as_non_null()
+                    func_ref.as_non_null().as_ref()
                 } else {
-                    func_data.export().func_ref
+                    func_data.export().func_ref.as_ref()
                 }
             };
             VMFunctionImport {
-                wasm_call: if let Some(wasm_call) = f.as_ref().wasm_call {
-                    wasm_call
-                } else {
-                    // Assert that this is a native-call function, since those
-                    // are the only ones that could be missing a `wasm_call`
-                    // trampoline.
-                    let _ = VMNativeCallHostFuncContext::from_opaque(f.as_ref().vmctx);
+                vmctx: f.vmctx,
+                payload: match f.payload.unpack() {
+                    UnpackedFuncRefPayload::Interpreter(i) => i.clone().into(),
+                    UnpackedFuncRefPayload::Trampolines(trampolines) => VMFuncRefTrampolines {
+                        wasm_call: if let Some(wasm_call) = trampolines.wasm_call {
+                            Some(wasm_call)
+                        } else {
+                            // Assert that this is a native-call function, since those
+                            // are the only ones that could be missing a `wasm_call`
+                            // trampoline.
+                            let _ = VMNativeCallHostFuncContext::from_opaque(f.vmctx);
 
-                    let sig = self.type_index(store.store_data());
-                    module.runtime_info().wasm_to_native_trampoline(sig).expect(
-                        "if the wasm is importing a function of a given type, it must have the \
-                         type's trampoline",
-                    )
+                            let sig = self.type_index(store.store_data());
+                            let wasm_call =
+                                module.runtime_info().wasm_to_native_trampoline(sig).expect(
+                                    "if the wasm is importing a function of a \
+                                 given type, it must have the type's \
+                                 trampoline",
+                                );
+                            Some(wasm_call)
+                        },
+                        native_call: trampolines.native_call,
+                        array_call: trampolines.array_call,
+                    }
+                    .into(),
                 },
-                native_call: f.as_ref().native_call,
-                array_call: f.as_ref().array_call,
-                vmctx: f.as_ref().vmctx,
             }
         }
     }
@@ -2294,9 +2315,11 @@ macro_rules! impl_into_func {
                 let ctx = unsafe {
                     VMNativeCallHostFuncContext::new(
                         VMFuncRef {
-                            native_call,
-                            array_call,
-                            wasm_call: None,
+                            payload: VMFuncRefTrampolines {
+                                native_call,
+                                array_call,
+                                wasm_call: None,
+                            }.into(),
                             type_index,
                             vmctx: ptr::null_mut(),
                         },
@@ -2459,7 +2482,12 @@ impl HostFunc {
         self.validate_store(store);
 
         if rooted_func_ref.is_some() {
-            debug_assert!(self.func_ref().wasm_call.is_none());
+            debug_assert!(self
+                .func_ref()
+                .payload
+                .unwrap_trampolines()
+                .wasm_call
+                .is_none());
             debug_assert!(matches!(self.ctx, HostContext::Native(_)));
         }
 

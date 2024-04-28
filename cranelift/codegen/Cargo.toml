@@ -79,7 +79,7 @@ x86 = []
 arm64 = []
 s390x = []
 riscv64 = []
-pbc64 = ["dep:cranelift-pulley", "cranelift-pulley/encode"]
+pbc64 = ["dep:cranelift-pulley", "cranelift-pulley/encode", "cranelift-pulley/disas"]
 # Enable the ISA target for the host machine
 host-arch = []
 

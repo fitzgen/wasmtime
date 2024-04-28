@@ -221,7 +221,32 @@ impl ABIMachineSpec for Pbc64MachineDeps {
     }
 
     fn gen_sp_reg_adjust(amount: i32) -> SmallInstVec<Inst> {
-        todo!()
+        let temp = WritableXReg::try_from(writable_spilltmp_reg()).unwrap();
+
+        let imm = if let Ok(x) = u8::try_from(amount) {
+            Inst::Xconst8 { dst: temp, imm: x }
+        } else if let Ok(x) = u16::try_from(amount) {
+            Inst::Xconst16 { dst: temp, imm: x }
+        } else if amount > 0 {
+            Inst::Xconst32 {
+                dst: temp,
+                imm: amount as u32,
+            }
+        } else {
+            Inst::Xconst64 {
+                dst: temp,
+                imm: i64::from(amount) as u64,
+            }
+        };
+
+        smallvec![
+            imm,
+            Inst::Xadd32 {
+                dst: WritableXReg::try_from(writable_stack_reg()).unwrap(),
+                src1: XReg::new(stack_reg()).unwrap(),
+                src2: temp.to_reg(),
+            }
+        ]
     }
 
     fn gen_nominal_sp_adj(offset: i32) -> Inst {
@@ -469,6 +494,56 @@ impl ABIMachineSpec for Pbc64MachineDeps {
         callee_pop_size: u32,
     ) -> SmallVec<[Self::I; 2]> {
         todo!()
+        // let mut insts = SmallVec::new();
+        // if callee_conv == isa::CallConv::Tail {
+        //     match &dest {
+        //         &CallDest::ExtName(ref name, RelocDistance::Near) => insts.push(Inst::Call {
+        //             info: Box::new(CallInfo {
+        //                 dest: name.clone(),
+        //                 uses,
+        //                 defs,
+        //                 clobbers,
+        //                 opcode,
+        //                 caller_callconv: caller_conv,
+        //                 callee_callconv: callee_conv,
+        //                 callee_pop_size,
+        //             }),
+        //         }),
+        //         &CallDest::ExtName(ref name, RelocDistance::Far) => {
+        //             insts.push(Inst::LoadExtName {
+        //                 rd: tmp,
+        //                 name: Box::new(name.clone()),
+        //                 offset: 0,
+        //             });
+        //             insts.push(Inst::CallInd {
+        //                 info: Box::new(CallIndInfo {
+        //                     rn: tmp.to_reg(),
+        //                     uses,
+        //                     defs,
+        //                     clobbers,
+        //                     opcode,
+        //                     caller_callconv: caller_conv,
+        //                     callee_callconv: callee_conv,
+        //                     callee_pop_size,
+        //                 }),
+        //             });
+        //         }
+        //         &CallDest::Reg(reg) => insts.push(Inst::CallInd {
+        //             info: Box::new(CallIndInfo {
+        //                 rn: *reg,
+        //                 uses,
+        //                 defs,
+        //                 clobbers,
+        //                 opcode,
+        //                 caller_callconv: caller_conv,
+        //                 callee_callconv: callee_conv,
+        //                 callee_pop_size,
+        //             }),
+        //         }),
+        //     }
+        // } else {
+        // }
+        // insts
     }
 
     fn gen_memcpy<F: FnMut(Type) -> Writable<Reg>>(

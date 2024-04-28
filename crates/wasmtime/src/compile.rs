@@ -79,7 +79,8 @@ pub(crate) fn build_artifacts<T: FinishedObject>(
         .context("failed to parse WebAssembly module")?;
     let functions = mem::take(&mut translation.function_body_inputs);
 
-    let compile_inputs = CompileInputs::for_module(&types, &translation, functions);
+    let compile_inputs =
+        CompileInputs::for_module(engine.compiler().triple(), &types, &translation, functions);
     let unlinked_compile_outputs = compile_inputs.compile(engine)?;
     let (compiled_funcs, function_indices) = unlinked_compile_outputs.pre_link();
 
@@ -145,6 +146,7 @@ pub(crate) fn build_component_artifacts<'a, T: FinishedObject>(
             .context("failed to parse WebAssembly module")?;
 
     let compile_inputs = CompileInputs::for_component(
+        engine.compiler().triple(),
         &types,
         &component,
         module_translations.iter_mut().map(|(i, translation)| {
@@ -342,6 +344,8 @@ struct CompileOutput {
 /// The collection of things we need to compile for a Wasm module or component.
 #[derive(Default)]
 struct CompileInputs<'a> {
+    // Whether or not we need to compile trampolines between the host and Wasm.
+    need_trampolines: bool,
     inputs: Vec<CompileInput<'a>>,
 }
 
@@ -352,13 +356,17 @@ impl<'a> CompileInputs<'a> {
 
     /// Create the `CompileInputs` for a core Wasm module.
     fn for_module(
+        triple: &target_lexicon::Triple,
         types: &'a ModuleTypesBuilder,
         translation: &'a ModuleTranslation<'a>,
         functions: PrimaryMap<DefinedFuncIndex, FunctionBodyData<'a>>,
     ) -> Self {
-        let mut ret = Self::default();
-        let module_index = StaticModuleIndex::from_u32(0);
+        let mut ret = CompileInputs {
+            need_trampolines: triple.architecture != target_lexicon::Architecture::Pbc64,
+            inputs: vec![],
+        };
 
+        let module_index = StaticModuleIndex::from_u32(0);
         ret.collect_inputs_in_translations(types, [(module_index, translation, functions)]);
 
         ret
@@ -367,6 +375,7 @@ impl<'a> CompileInputs<'a> {
     /// Create a `CompileInputs` for a component.
     #[cfg(feature = "component-model")]
     fn for_component(
+        triple: &target_lexicon::Triple,
         types: &'a wasmtime_environ::component::ComponentTypesBuilder,
         component: &'a wasmtime_environ::component::ComponentTranslation,
         module_translations: impl IntoIterator<
@@ -377,7 +386,10 @@ impl<'a> CompileInputs<'a> {
             ),
         >,
     ) -> Self {
-        let mut ret = CompileInputs::default();
+        let mut ret = CompileInputs {
+            need_trampolines: triple.architecture != target_lexicon::Architecture::Pbc64,
+            inputs: vec![],
+        };
 
         ret.collect_inputs_in_translations(types.module_types_builder(), module_translations);
 
@@ -449,7 +461,7 @@ impl<'a> CompileInputs<'a> {
                 });
 
                 let func_index = translation.module.func_index(def_func_index);
-                if translation.module.functions[func_index].is_escaping() {
+                if self.need_trampolines && translation.module.functions[func_index].is_escaping() {
                     self.push_input(move |compiler| {
                         let func_index = translation.module.func_index(def_func_index);
                         let trampoline = compiler.compile_array_to_wasm_trampoline(
@@ -491,25 +503,28 @@ impl<'a> CompileInputs<'a> {
             }
         }
 
-        let mut trampoline_types_seen = HashSet::new();
-        for (_func_type_index, trampoline_type_index) in types.trampoline_types() {
-            let is_new = trampoline_types_seen.insert(trampoline_type_index);
-            if !is_new {
-                continue;
+        if self.need_trampolines {
+            let mut trampoline_types_seen = HashSet::new();
+            for (_func_type_index, trampoline_type_index) in types.trampoline_types() {
+                let is_new = trampoline_types_seen.insert(trampoline_type_index);
+                if !is_new {
+                    continue;
+                }
+                let trampoline_func_ty = types[trampoline_type_index].unwrap_func();
+                self.push_input(move |compiler| {
+                    let trampoline =
+                        compiler.compile_wasm_to_native_trampoline(trampoline_func_ty)?;
+                    Ok(CompileOutput {
+                        key: CompileKey::wasm_to_native_trampoline(trampoline_type_index),
+                        symbol: format!(
+                            "signatures[{}]::wasm_to_native_trampoline",
+                            trampoline_type_index.as_u32()
+                        ),
+                        function: CompiledFunction::Function(trampoline),
+                        info: None,
+                    })
+                });
             }
-            let trampoline_func_ty = types[trampoline_type_index].unwrap_func();
-            self.push_input(move |compiler| {
-                let trampoline = compiler.compile_wasm_to_native_trampoline(trampoline_func_ty)?;
-                Ok(CompileOutput {
-                    key: CompileKey::wasm_to_native_trampoline(trampoline_type_index),
-                    symbol: format!(
-                        "signatures[{}]::wasm_to_native_trampoline",
-                        trampoline_type_index.as_u32()
-                    ),
-                    function: CompiledFunction::Function(trampoline),
-                    info: None,
-                })
-            });
         }
     }
 
@@ -736,7 +751,8 @@ impl FunctionIndices {
             }
         }
 
-        let mut obj = wasmtime_environ::ObjectBuilder::new(obj, tunables);
+        let mut obj =
+            wasmtime_environ::ObjectBuilder::new(obj, tunables, compiler.triple().clone());
         let mut artifacts = Artifacts::default();
 
         // Remove this as it's not needed by anything below and we'll debug
@@ -839,23 +855,29 @@ impl FunctionIndices {
                         })
                         .collect();
 
-                let unique_and_sorted_trampoline_sigs = translation
-                    .module
-                    .types
-                    .iter()
-                    .map(|(_, ty)| *ty)
-                    .filter(|idx| types[*idx].is_func())
-                    .map(|idx| types.trampoline_type(idx))
-                    .collect::<BTreeSet<_>>();
-                let wasm_to_native_trampolines = unique_and_sorted_trampoline_sigs
-                    .iter()
-                    .map(|idx| {
-                        let trampoline = types.trampoline_type(*idx);
-                        let key = CompileKey::wasm_to_native_trampoline(trampoline);
-                        let compiled = wasm_to_native_trampolines[&key];
-                        (*idx, symbol_ids_and_locs[compiled.unwrap_function()].1)
-                    })
-                    .collect();
+                let wasm_to_native_trampolines = if engine.compiler().triple().architecture
+                    == target_lexicon::Architecture::Pbc64
+                {
+                    vec![]
+                } else {
+                    let unique_and_sorted_trampoline_sigs = translation
+                        .module
+                        .types
+                        .iter()
+                        .map(|(_, ty)| *ty)
+                        .filter(|idx| types[*idx].is_func())
+                        .map(|idx| types.trampoline_type(idx))
+                        .collect::<BTreeSet<_>>();
+                    unique_and_sorted_trampoline_sigs
+                        .iter()
+                        .map(|idx| {
+                            let trampoline = types.trampoline_type(*idx);
+                            let key = CompileKey::wasm_to_native_trampoline(trampoline);
+                            let compiled = wasm_to_native_trampolines[&key];
+                            (*idx, symbol_ids_and_locs[compiled.unwrap_function()].1)
+                        })
+                        .collect()
+                };
 
                 obj.append(translation, funcs, wasm_to_native_trampolines)
             })

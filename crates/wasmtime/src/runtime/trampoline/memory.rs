@@ -56,7 +56,8 @@ pub fn create_memory(
     // associated with external objects. The configured instance allocator
     // should only be used when creating module instances as we don't want host
     // objects to count towards instance limits.
-    let runtime_info = &BareModuleInfo::maybe_imported_func(Arc::new(module), None).into_traitobj();
+    let runtime_info = &BareModuleInfo::maybe_imported_func(store.engine(), Arc::new(module), None)
+        .into_traitobj();
     let host_state = Box::new(());
     let imports = Imports::default();
     let request = InstanceAllocationRequest {

@@ -100,12 +100,18 @@ impl Inst {
             mem,
             ty,
             flags,
+            ext: ExtKind::Zero,
         }
     }
 
     /// Generic constructor for a store.
     pub fn gen_store(mem: Amode, from_reg: Reg, ty: Type, flags: MemFlags) -> Inst {
-        todo!()
+        Inst::Store {
+            mem,
+            src: from_reg,
+            ty,
+            flags,
+        }
     }
 }
 
@@ -123,13 +129,21 @@ fn pbc64_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
         }
         Inst::Unwind { .. } => {}
 
-        Inst::Trap => todo!(),
+        Inst::Trap { .. } => {}
 
         Inst::Nop => todo!(),
 
         Inst::Ret => todo!(),
 
         Inst::Jump { .. } => {}
+
+        Inst::BrIf {
+            c,
+            taken: _,
+            not_taken: _,
+        } => {
+            collector.reg_use(c);
+        }
 
         Inst::Xmov { dst, src } => todo!(),
         Inst::Fmov { dst, src } => todo!(),
@@ -147,7 +161,26 @@ fn pbc64_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
         }
         Inst::Xadd64 { .. } => todo!(),
 
-        Inst::Load { .. } => todo!(),
+        Inst::Load {
+            dst,
+            mem,
+            ty: _,
+            flags: _,
+            ext: _,
+        } => {
+            collector.reg_def(dst);
+            mem.get_operands(collector);
+        }
+
+        Inst::Store {
+            mem,
+            src,
+            ty: _,
+            flags: _,
+        } => {
+            mem.get_operands(collector);
+            collector.reg_use(src);
+        }
 
         Inst::BitcastIntFromFloat32 { dst, src } => todo!(),
         Inst::BitcastIntFromFloat64 { dst, src } => todo!(),
@@ -176,7 +209,7 @@ impl MachInst for Inst {
 
     fn is_safepoint(&self) -> bool {
         match self {
-            Inst::Trap => true,
+            Inst::Trap { .. } => true,
             _ => false,
         }
     }
@@ -198,7 +231,7 @@ impl MachInst for Inst {
 
     fn is_trap(&self) -> bool {
         match self {
-            Inst::Trap => true,
+            Inst::Trap { .. } => true,
             _ => false,
         }
     }
@@ -272,7 +305,8 @@ impl MachInst for Inst {
     }
 
     fn worst_case_size() -> CodeOffset {
-        5
+        // xconst64 = 1 byte opcode + 1 byte destination reg + 8 byte immediate
+        10
     }
 
     fn ref_type_regclass(_settings: &settings::Flags) -> RegClass {
@@ -336,6 +370,14 @@ impl Inst {
             x
         };
 
+        let format_ext = |ext: ExtKind| -> &'static str {
+            match ext {
+                ExtKind::None => "",
+                ExtKind::Sign => "_s",
+                ExtKind::Zero => "_u",
+            }
+        };
+
         let format_labels = |labels: &[MachLabel]| -> String {
             if labels.len() == 0 {
                 return String::from("[_]");
@@ -378,13 +420,24 @@ impl Inst {
 
             Inst::Unwind { inst } => format!("unwind {inst:?}"),
 
-            Inst::Trap => todo!(),
+            Inst::Trap { code } => format!("trap // code = {code:?}"),
 
             Inst::Nop => todo!(),
 
             Inst::Ret => todo!(),
 
             Inst::Jump { label } => format!("jump {}", label.to_string()),
+
+            Inst::BrIf {
+                c,
+                taken,
+                not_taken,
+            } => {
+                let c = format_reg(**c, allocs);
+                let taken = taken.to_string();
+                let not_taken = not_taken.to_string();
+                format!("br_if {c}, {taken}; jump {not_taken}")
+            }
 
             Inst::Xmov { dst, src } => todo!(),
             Inst::Fmov { dst, src } => todo!(),
@@ -403,7 +456,31 @@ impl Inst {
             ),
             Inst::Xadd64 { .. } => todo!(),
 
-            Inst::Load { .. } => todo!(),
+            Inst::Load {
+                dst,
+                mem,
+                ty,
+                flags,
+                ext,
+            } => {
+                let dst = format_reg(dst.to_reg(), allocs);
+                let ty = ty.bits();
+                let ext = format_ext(*ext);
+                let mem = mem.to_string();
+                format!("{dst} = load{ty}{ext} {mem} // flags = {flags}")
+            }
+
+            Inst::Store {
+                mem,
+                src,
+                ty,
+                flags,
+            } => {
+                let ty = ty.bits();
+                let mem = mem.to_string();
+                let src = format_reg(*src, allocs);
+                format!("store{ty} {mem}, {src} // flags = {flags}")
+            }
 
             Inst::BitcastIntFromFloat32 { dst, src } => todo!(),
             Inst::BitcastIntFromFloat64 { dst, src } => todo!(),

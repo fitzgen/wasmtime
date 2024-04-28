@@ -81,6 +81,7 @@ where
 {
     use crate::compile::finish_object;
     use crate::prelude::*;
+    use crate::vm::VMFuncRefTrampolines;
     use std::ptr;
 
     let mut obj = engine
@@ -94,7 +95,11 @@ where
             &mut obj,
         )?;
     engine.append_bti(&mut obj);
-    let obj = finish_object(wasmtime_environ::ObjectBuilder::new(obj, engine.tunables()))?;
+    let obj = finish_object(wasmtime_environ::ObjectBuilder::new(
+        obj,
+        engine.tunables(),
+        engine.compiler().triple().clone(),
+    ))?;
 
     // Copy the results of JIT compilation into executable memory, and this will
     // also take care of unwind table registration.
@@ -123,9 +128,12 @@ where
     unsafe {
         Ok(VMArrayCallHostFuncContext::new(
             VMFuncRef {
-                array_call,
-                wasm_call,
-                native_call,
+                payload: VMFuncRefTrampolines {
+                    array_call,
+                    wasm_call,
+                    native_call,
+                }
+                .into(),
                 type_index: sig.index(),
                 vmctx: ptr::null_mut(),
             },

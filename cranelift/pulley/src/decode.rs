@@ -233,9 +233,7 @@ impl Decode for XReg {
         T: DecodeRawMethods,
     {
         let (size, byte) = u8::decode::<T>(position, bytecode)?;
-        let reg = XReg::new(byte)
-            .or_else(|| XReg::special(byte))
-            .ok_or_else(|| T::invalid_reg(position + size, byte))?;
+        let reg = XReg::new(byte).ok_or_else(|| T::invalid_reg(position + size, byte))?;
         Ok((size, reg))
     }
 }

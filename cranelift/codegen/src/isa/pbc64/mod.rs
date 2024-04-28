@@ -16,8 +16,9 @@ use crate::{
     machinst::{self, CompiledCodeStencil, MachInst, SigSet, VCode},
     result::CodegenResult,
     settings::{self as shared_settings, Flags},
-    TextSectionBuilder,
+    MachTextSectionBuilder, TextSectionBuilder,
 };
+use alloc::boxed::Box;
 use alloc::vec::Vec;
 use cranelift_control::ControlPlane;
 use target_lexicon::{Architecture, Triple};
@@ -121,6 +122,10 @@ impl TargetIsa for Pbc64Backend {
             log::debug!("disassembly:\n{}", disasm);
         }
 
+        let mut disas = cranelift_pulley::disas::Disassembler::new(&buffer.data);
+        cranelift_pulley::decode::Decoder::decode_all(&mut disas, &buffer.data);
+        log::debug!("FITZGEN: pulley disassembly:\n{}", disas.disas());
+
         Ok(CompiledCodeStencil {
             buffer,
             frame_size,
@@ -138,14 +143,15 @@ impl TargetIsa for Pbc64Backend {
         result: &crate::CompiledCode,
         kind: super::unwind::UnwindInfoKind,
     ) -> CodegenResult<Option<isa::unwind::UnwindInfo>> {
-        todo!()
+        // TODO FITZGEN
+        Ok(None)
     }
 
     fn text_section_builder(
         &self,
         num_labeled_funcs: usize,
     ) -> alloc::boxed::Box<dyn TextSectionBuilder> {
-        todo!()
+        Box::new(MachTextSectionBuilder::<inst::Inst>::new(num_labeled_funcs))
     }
 
     fn function_alignment(&self) -> FunctionAlignment {

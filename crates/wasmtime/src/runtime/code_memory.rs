@@ -25,6 +25,8 @@ pub struct CodeMemory {
     relocations: Vec<(usize, obj::LibCall)>,
 
     // Ranges within `self.mmap` of where the particular sections lie.
+    //
+    // TODO FITZGEN: need to not make this executable when it is pulley code
     text: Range<usize>,
     unwind: Range<usize>,
     trap_data: Range<usize>,

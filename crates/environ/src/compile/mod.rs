@@ -338,6 +338,10 @@ pub trait Compiler: Send + Sync {
                 Aarch64(_) => Architecture::Aarch64,
                 S390x => Architecture::S390x,
                 Riscv64(_) => Architecture::Riscv64,
+                // XXX: the `object` crate won't successfully build an object
+                // with relocations and such if it doesn't know the
+                // architecture, so just pretend we are riscv64. yolo!
+                Pbc64 => Architecture::Riscv64,
                 architecture => {
                     anyhow::bail!("target architecture {:?} is unsupported", architecture,);
                 }

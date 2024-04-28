@@ -14,6 +14,8 @@
 //      gc_heap_data: *mut T, // Collector-specific pointer
 //      store: *mut dyn Store,
 //      type_ids: *const VMSharedTypeIndex,
+//      is_interpreter: bool,
+//      _padding: [u8; 7], // (On 64-bit systems, or 3 on 32-bit)
 //      imported_functions: [VMFunctionImport; module.num_imported_functions],
 //      imported_tables: [VMTableImport; module.num_imported_tables],
 //      imported_memories: [VMMemoryImport; module.num_imported_memories],
@@ -87,6 +89,7 @@ pub struct VMOffsets<P> {
     gc_heap_data: u32,
     store: u32,
     type_ids: u32,
+    is_interpreter: u32,
     imported_functions: u32,
     imported_tables: u32,
     imported_memories: u32,
@@ -390,6 +393,7 @@ impl<P: PtrSize> VMOffsets<P> {
             imported_tables: "imported tables",
             imported_functions: "imported functions",
             type_ids: "module types",
+            is_interpreter: "is-interpreter tag",
             store: "jit store state",
             gc_heap_data: "GC implementation-specific data",
             gc_heap_bound: "GC heap bound",
@@ -427,6 +431,7 @@ impl<P: PtrSize> From<VMOffsetsFields<P>> for VMOffsets<P> {
             gc_heap_data: 0,
             store: 0,
             type_ids: 0,
+            is_interpreter: 0,
             imported_functions: 0,
             imported_tables: 0,
             imported_memories: 0,
@@ -481,6 +486,8 @@ impl<P: PtrSize> From<VMOffsetsFields<P>> for VMOffsets<P> {
             size(gc_heap_data) = ret.ptr.size(),
             size(store) = ret.ptr.size() * 2,
             size(type_ids) = ret.ptr.size(),
+            size(is_interpreter) = 1u32,
+            align(u32::from(ret.ptr.size())),
             size(imported_functions)
                 = cmul(ret.num_imported_functions, ret.size_of_vmfunction_import()),
             size(imported_tables)
@@ -708,6 +715,12 @@ impl<P: PtrSize> VMOffsets<P> {
     #[inline]
     pub fn vmctx_type_ids_array(&self) -> u32 {
         self.type_ids
+    }
+
+    /// The offset of the `is_interpreter` tag.
+    #[inline]
+    pub fn vmctx_is_interpreter(&self) -> u32 {
+        self.is_interpreter
     }
 
     /// The offset of the `tables` array.

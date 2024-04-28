@@ -6,7 +6,7 @@ macro_rules! define_registers {
     (
         $(
             $( #[$attr:meta] )*
-            pub struct $name:ident ;
+            pub struct $name:ident = $range:expr;
         )*
 ) => {
         $(
@@ -16,7 +16,7 @@ macro_rules! define_registers {
 
             impl $name {
                 /// The valid register range for this register class.
-                pub const RANGE: Range<u8> = 0..32;
+                pub const RANGE: Range<u8> = $range;
 
                 /// Construct a new register of this class.
                 #[inline]
@@ -42,41 +42,33 @@ macro_rules! define_registers {
                     usize::from(self.0)
                 }
             }
+
+            #[cfg(feature = "arbitrary")]
+            impl<'a> arbitrary::Arbitrary<'a> for $name {
+                fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+                    let index = u.int_in_range(Self::RANGE.start..=Self::RANGE.end - 1)?;
+                    Ok(Self(index))
+                }
+            }
+
         )*
     }
 }
 
 define_registers! {
     /// TODO FITZGEN
-    pub struct XReg;
+    pub struct XReg = 0..37;
 
     /// TODO FITZGEN
-    pub struct FReg;
+    pub struct FReg = 0..32;
 
     /// TODO FITZGEN
-    pub struct VReg;
+    pub struct VReg = 0..32;
 }
 
 impl XReg {
     /// The valid special register range.
     pub const SPECIAL_RANGE: Range<u8> = 32..37;
-
-    /// Construct a new special register of this class.
-    #[inline]
-    pub fn special(index: u8) -> Option<Self> {
-        if Self::SPECIAL_RANGE.start <= index && index < Self::SPECIAL_RANGE.end {
-            Some(unsafe { Self::unchecked_special(index) })
-        } else {
-            None
-        }
-    }
-    /// Construct a new special register of this class without checking that
-    /// `index` is a valid special register index.
-    #[inline]
-    pub unsafe fn unchecked_special(index: u8) -> Self {
-        debug_assert!(Self::SPECIAL_RANGE.start <= index && index < Self::SPECIAL_RANGE.end);
-        Self(index)
-    }
 }
 
 impl core::fmt::Display for XReg {
@@ -101,34 +93,5 @@ impl core::fmt::Display for FReg {
 impl core::fmt::Display for VReg {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "v{}", self.0)
-    }
-}
-
-#[cfg(feature = "arbitrary")]
-impl<'a> arbitrary::Arbitrary<'a> for XReg {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        if u.arbitrary()? {
-            let index = u.int_in_range(XReg::RANGE.start..=XReg::RANGE.end - 1)?;
-            Ok(XReg::new(index).unwrap())
-        } else {
-            let index = u.int_in_range(XReg::SPECIAL_RANGE.start..=XReg::SPECIAL_RANGE.end - 1)?;
-            Ok(XReg::special(index).unwrap())
-        }
-    }
-}
-
-#[cfg(feature = "arbitrary")]
-impl<'a> arbitrary::Arbitrary<'a> for FReg {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let index = u.int_in_range(FReg::RANGE.start..=FReg::RANGE.end - 1)?;
-        Ok(FReg::new(index).unwrap())
-    }
-}
-
-#[cfg(feature = "arbitrary")]
-impl<'a> arbitrary::Arbitrary<'a> for VReg {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let index = u.int_in_range(VReg::RANGE.start..=VReg::RANGE.end - 1)?;
-        Ok(VReg::new(index).unwrap())
     }
 }

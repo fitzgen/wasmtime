@@ -206,7 +206,7 @@ where
             let (func_ref, ret, params, returned) = &mut captures;
             let func_ref = func_ref.as_ref();
             let result =
-                Params::invoke::<Results>(func_ref.native_call, func_ref.vmctx, caller, *params);
+                Params::invoke::<Results>(func_ref.payload.unwrap_trampolines().native_call, func_ref.vmctx, caller, *params);
             ptr::write(ret.as_mut_ptr(), result);
             *returned = true
         });

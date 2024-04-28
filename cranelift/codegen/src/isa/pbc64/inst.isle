@@ -18,7 +18,7 @@
     ;;;; Actual Instructions ;;;;
 
     ;; Raise a trap.
-    (Trap)
+    (Trap (code TrapCode))
 
     ;; Nothing.
     (Nop)
@@ -29,11 +29,16 @@
     ;; Unconditional jumps.
     (Jump (label MachLabel))
 
+    ;; Jump to `then` if `c` is nonzero, otherwise to `else`.
+    (BrIf (c XReg) (taken MachLabel) (not_taken MachLabel))
+
     ;; Register-to-register moves.
     (Xmov (dst WritableXReg) (src XReg))
     (Fmov (dst WritableFReg) (src FReg))
     (Vmov (dst WritableVReg) (src VReg))
 
+    ;; TODO FITZGEN: probably want to make these sign-extend, actually
+    ;;
     ;; Integer constants, zero-extended to 64 bits.
     (Xconst8 (dst WritableXReg) (imm u8))
     (Xconst16 (dst WritableXReg) (imm u16))
@@ -45,7 +50,10 @@
     (Xadd64 (dst WritableXReg) (src1 XReg) (src2 XReg))
 
     ;; Loads.
-    (Load (dst WritableReg) (mem Amode) (ty Type) (flags MemFlags))
+    (Load (dst WritableReg) (mem Amode) (ty Type) (flags MemFlags) (ext ExtKind))
+
+    ;; Stores.
+    (Store (mem Amode) (src Reg) (ty Type) (flags MemFlags))
 
     ;; Bitcasts.
     (BitcastIntFromFloat32 (dst WritableXReg) (src FReg))
@@ -66,6 +74,8 @@
     (Stack (amode StackAMode))
   )
 )
+
+(type ExtKind (enum None Sign Zero))
 
 ;;;; Newtypes for Different Register Classes ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -313,6 +323,10 @@
 
 ;;;; Instruction Constructors ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(decl pbc_trap (TrapCode) SideEffectNoResult)
+(rule (pbc_trap code)
+      (SideEffectNoResult.Inst (MInst.Trap code)))
+
 (decl pbc_xconst8 (u8) XReg)
 (rule (pbc_xconst8 x)
       (let ((reg WritableXReg (temp_writable_xreg))
@@ -341,6 +355,10 @@
 (rule (pbc_jump label)
       (SideEffectNoResult.Inst (MInst.Jump label)))
 
+(decl pbc_br_if (XReg MachLabel MachLabel) SideEffectNoResult)
+(rule (pbc_br_if c taken not_taken)
+      (SideEffectNoResult.Inst (MInst.BrIf c taken not_taken)))
+
 (decl pbc_xadd32 (XReg XReg) XReg)
 (rule (pbc_xadd32 a b)
       (let ((dst WritableXReg (temp_writable_xreg))
@@ -352,6 +370,16 @@
       (let ((dst WritableXReg (temp_writable_xreg))
             (_ Unit (emit (MInst.Xadd64 dst a b))))
         dst))
+
+(decl pbc_load (Amode Type MemFlags ExtKind) Reg)
+(rule (pbc_load amode ty flags ext)
+      (let ((dst WritableReg (temp_writable_reg ty))
+            (_ Unit (emit (MInst.Load dst amode ty flags ext))))
+        dst))
+
+(decl pbc_store (Amode Reg Type MemFlags) SideEffectNoResult)
+(rule (pbc_store amode src ty flags)
+      (SideEffectNoResult.Inst (MInst.Store amode src ty flags)))
 
 (decl pbc_bitcast_float_from_int_32 (XReg) FReg)
 (rule (pbc_bitcast_float_from_int_32 src)

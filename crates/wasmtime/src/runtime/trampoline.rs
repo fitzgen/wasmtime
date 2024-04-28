@@ -41,7 +41,8 @@ fn create_handle(
         // as we don't want host objects to count towards instance limits.
         let module = Arc::new(module);
         let runtime_info =
-            &BareModuleInfo::maybe_imported_func(module, one_signature).into_traitobj();
+            &BareModuleInfo::maybe_imported_func(store.engine(), module, one_signature)
+                .into_traitobj();
         let allocator = OnDemandInstanceAllocator::new(config.mem_creator.clone(), 0);
         let handle = allocator.allocate_module(InstanceAllocationRequest {
             imports,

@@ -98,6 +98,17 @@ macro_rules! newtype_of_reg {
                 Self::new(r.to_reg().to_real_reg().unwrap().hw_enc()).unwrap()
             }
         }
+
+        impl TryFrom<Writable<Reg>> for $newtype_writable_reg {
+            type Error = ();
+            fn try_from(r: Writable<Reg>) -> Result<Self, Self::Error> {
+                let r = r.to_reg();
+                match $newtype_reg::new(r) {
+                    Some(r) => Ok(Writable::from_reg(r)),
+                    None => Err(()),
+                }
+            }
+        }
     };
 }
 
@@ -105,6 +116,8 @@ macro_rules! newtype_of_reg {
 newtype_of_reg!(XReg, WritableXReg, |reg| reg.class() == RegClass::Int);
 newtype_of_reg!(FReg, WritableFReg, |reg| reg.class() == RegClass::Float);
 newtype_of_reg!(VReg, WritableVReg, |reg| reg.class() == RegClass::Vector);
+
+pub use super::super::lower::isle::generated_code::ExtKind;
 
 pub use super::super::lower::isle::generated_code::Amode;
 

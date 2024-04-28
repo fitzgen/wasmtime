@@ -21,6 +21,11 @@ impl<'a> Disassembler<'a> {
             disas: String::new(),
         }
     }
+
+    /// TODO FITZGEN
+    pub fn disas(&self) -> &str {
+        &self.disas
+    }
 }
 
 macro_rules! impl_disas {
@@ -39,14 +44,13 @@ macro_rules! impl_disas {
             type Return = ();
 
             fn before_visit(&mut self, size: usize) {
-                write!(&mut self.disas, "{:8x}    ", self.position).unwrap();
-
+                write!(&mut self.disas, "{:8x}: ", self.position).unwrap();
                 let mut need_space = false;
                 for byte in &self.bytecode[self.position..][..size] {
-                    write!(&mut self.disas, "{}{byte:x}", if need_space { " " } else { "" }).unwrap();
+                    write!(&mut self.disas, "{}{byte:02x}", if need_space { " " } else { "" }).unwrap();
                     need_space = true;
                 }
-                for _ in 0..6 - size {
+                for _ in 0..11_usize.saturating_sub(size) {
                     write!(&mut self.disas, "   ").unwrap();
                 }
             }
@@ -63,11 +67,10 @@ macro_rules! impl_disas {
                     $(
                         let mut need_comma = false;
                         $(
-                            let field = stringify!($field);
                             let val = $field;
                             write!(
                                 &mut self.disas,
-                                "{} {field}={val}",
+                                "{} {val}",
                                 if need_comma { "," } else { "" },
                             ).unwrap();
                             #[allow(unused_assignments)]

@@ -18,6 +18,10 @@ macro_rules! for_each_op {
             ret = Ret;
             /// TODO FITZGEN
             jump = Jump { offset: i32 };
+            /// TODO FITZGEN
+            br_if = BrIf { cond: XReg, offset: i32 };
+            /// TODO FITZGEN
+            br_if_not = BrIfNot { cond: XReg, offset: i32 };
 
             /// TODO FITZGEN
             xmov = Xmov { dst: XReg, src: XReg };
@@ -33,7 +37,7 @@ macro_rules! for_each_op {
             /// TODO FITZGEN
             xconst32 = Xconst32 { dst: XReg, imm: u32 };
             /// TODO FITZGEN
-            xconst64 = Xconst64 { dst: XReg, imm: u32 };
+            xconst64 = Xconst64 { dst: XReg, imm: u64 };
 
             /// TODO FITZGEN
             xadd32 = Xadd32 { dst: XReg, src1: XReg, src2: XReg };
@@ -41,32 +45,64 @@ macro_rules! for_each_op {
             xadd64 = Xadd64 { dst: XReg, src1: XReg, src2: XReg };
 
             /// TODO FITZGEN
-            load32_u = LoadU32 { dst: XReg, src: XReg };
+            load32_u = LoadU32 { dst: XReg, ptr: XReg };
             /// TODO FITZGEN
-            load32_s = LoadS32 { dst: XReg, src: XReg };
+            load32_s = LoadS32 { dst: XReg, ptr: XReg };
             /// TODO FITZGEN
-            load64 = Load64 { dst: XReg, src: XReg };
+            load64 = Load64 { dst: XReg, ptr: XReg };
 
             /// TODO FITZGEN
-            load32_u_offset8 = Load32UOffset8 { dst: XReg, src: XReg, offset: i16 };
+            load32_u_offset8 = Load32UOffset8 { dst: XReg, ptr: XReg, offset: i8 };
             /// TODO FITZGEN
-            load32_s_offset8 = Load32SOffset8 { dst: XReg, src: XReg, offset: i16 };
+            load32_s_offset8 = Load32SOffset8 { dst: XReg, ptr: XReg, offset: i8 };
             /// TODO FITZGEN
-            load64_offset8 = Load64Offset8 { dst: XReg, src: XReg, offset: i16 };
+            load64_offset8 = Load64Offset8 { dst: XReg, ptr: XReg, offset: i8 };
 
             /// TODO FITZGEN
-            load32_u_offset16 = Load32UOffset16 { dst: XReg, src: XReg, offset: i16 };
+            load32_u_offset16 = Load32UOffset16 { dst: XReg, ptr: XReg, offset: i16 };
             /// TODO FITZGEN
-            load32_s_offset16 = Load32SOffset16 { dst: XReg, src: XReg, offset: i16 };
+            load32_s_offset16 = Load32SOffset16 { dst: XReg, ptr: XReg, offset: i16 };
             /// TODO FITZGEN
-            load64_offset16 = Load64Offset16 { dst: XReg, src: XReg, offset: i16 };
+            load64_offset16 = Load64Offset16 { dst: XReg, ptr: XReg, offset: i16 };
 
             /// TODO FITZGEN
-            load32_u_offset32 = Load32UOffset32 { dst: XReg, src: XReg, offset: i32 };
+            load32_u_offset32 = Load32UOffset32 { dst: XReg, ptr: XReg, offset: i32 };
             /// TODO FITZGEN
-            load32_s_offset32 = Load32SOffset32 { dst: XReg, src: XReg, offset: i32 };
+            load32_s_offset32 = Load32SOffset32 { dst: XReg, ptr: XReg, offset: i32 };
             /// TODO FITZGEN
-            load64_offset32 = Load64Offset32 { dst: XReg, src: XReg, offset: i32 };
+            load64_offset32 = Load64Offset32 { dst: XReg, ptr: XReg, offset: i32 };
+
+            /// TODO FITZGEN
+            load32_u_offset64 = Load32UOffset64 { dst: XReg, ptr: XReg, offset: i64 };
+            /// TODO FITZGEN
+            load32_s_offset64 = Load32SOffset64 { dst: XReg, ptr: XReg, offset: i64 };
+            /// TODO FITZGEN
+            load64_offset64 = Load64Offset64 { dst: XReg, ptr: XReg, offset: i64 };
+
+            /// TODO FITZGEN
+            store32 = StoreS32 { ptr: XReg, src: XReg };
+            /// TODO FITZGEN
+            store64 = Store64 { ptr: XReg, src: XReg };
+
+            /// TODO FITZGEN
+            store32_offset8 = Store32SOffset8 { ptr: XReg, offset: i8, src: XReg };
+            /// TODO FITZGEN
+            store64_offset8 = Store64Offset8 { ptr: XReg, offset: i8, src: XReg };
+
+            /// TODO FITZGEN
+            store32_offset16 = Store32Offset16 { ptr: XReg, offset: i16, src: XReg };
+            /// TODO FITZGEN
+            store64_offset16 = Store64Offset16 { ptr: XReg, offset: i16, src: XReg };
+
+            /// TODO FITZGEN
+            store32_offset32 = Store32Offset32 { ptr: XReg, offset: i32, src: XReg };
+            /// TODO FITZGEN
+            store64_offset32 = Store64Offset32 { ptr: XReg, offset: i32, src: XReg };
+
+            /// TODO FITZGEN
+            store32_offset64 = Store32Offset64 { ptr: XReg, offset: i64, src: XReg };
+            /// TODO FITZGEN
+            store64_offset64 = Store64Offset64 { ptr: XReg, offset: i64, src: XReg };
 
             /// TODO FITZGEN
             bitcast_int_from_float_32 = BitcastIntFromFloat32 { dst: XReg, src: FReg };

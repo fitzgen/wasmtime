@@ -1823,7 +1823,7 @@ impl Config {
         {
             tunables.winch_callable = match self.compiler_config.strategy {
                 Strategy::Auto => !cfg!(feature = "cranelift") && cfg!(feature = "winch"),
-                Strategy::Cranelift => false,
+                Strategy::Cranelift | Strategy::Pulley => false,
                 Strategy::Winch => true,
             };
 
@@ -1903,14 +1903,30 @@ impl Config {
             Strategy::Auto => wasmtime_cranelift::builder(target)?,
             #[cfg(all(feature = "winch", not(feature = "cranelift")))]
             Strategy::Auto => wasmtime_winch::builder(target)?,
+
             #[cfg(feature = "cranelift")]
             Strategy::Cranelift => wasmtime_cranelift::builder(target)?,
             #[cfg(not(feature = "cranelift"))]
             Strategy::Cranelift => bail!("cranelift support not compiled in"),
+
             #[cfg(feature = "winch")]
             Strategy::Winch => wasmtime_winch::builder(target)?,
             #[cfg(not(feature = "winch"))]
             Strategy::Winch => bail!("winch support not compiled in"),
+
+            #[cfg(all(feature = "pulley", feature = "cranelift"))]
+            Strategy::Pulley => wasmtime_cranelift::builder(Some(target_lexicon::Triple {
+                architecture: target_lexicon::Architecture::Pbc64,
+                vendor: target_lexicon::Vendor::Unknown,
+                operating_system: target_lexicon::OperatingSystem::Unknown,
+                environment: target_lexicon::Environment::Unknown,
+                binary_format: target_lexicon::BinaryFormat::Elf,
+            }))?,
+            #[cfg(not(all(feature = "pulley", feature = "cranelift")))]
+            Strategy::Pulley => bail!(
+                "Pulley support not compiled in: requires enabling both \
+                 `pulley` and `cranelift` cargo features"
+            ),
         };
 
         if let Some(path) = &self.compiler_config.clif_dir {
@@ -2202,6 +2218,9 @@ pub enum Strategy {
     /// A baseline compiler for WebAssembly, currently under active development and not ready for
     /// production applications.
     Winch,
+
+    /// TODO FITZGEN
+    Pulley,
 }
 
 /// Possible optimization levels for the Cranelift codegen backend.
@@ -2830,7 +2849,10 @@ impl PoolingAllocationConfig {
 pub(crate) fn probestack_supported(arch: Architecture) -> bool {
     matches!(
         arch,
-        Architecture::X86_64 | Architecture::Aarch64(_) | Architecture::Riscv64(_)
+        Architecture::X86_64
+            | Architecture::Aarch64(_)
+            | Architecture::Riscv64(_)
+            | Architecture::Pbc64
     )
 }
 

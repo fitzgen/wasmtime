@@ -360,6 +360,7 @@ default = [
 # These features are off-by-default but may optionally be enabled.
 all-arch = ["wasmtime/all-arch"]
 winch = ["wasmtime/winch"]
+pulley = ["wasmtime/pulley"]
 wmemcheck = ["wasmtime/wmemcheck"]
 
 # This feature, when enabled, will statically compile out all logging statements

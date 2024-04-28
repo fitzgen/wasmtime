@@ -1070,6 +1070,10 @@ impl crate::runtime::vm::ModuleRuntimeInfo for ModuleInner {
         self.module.module()
     }
 
+    fn is_interpreter(&self) -> bool {
+        self.module.is_pulley()
+    }
+
     fn engine_type_index(
         &self,
         module_index: wasmtime_environ::ModuleInternedTypeIndex,
@@ -1094,6 +1098,7 @@ impl crate::runtime::vm::ModuleRuntimeInfo for ModuleInner {
         &self,
         index: DefinedFuncIndex,
     ) -> Option<NonNull<VMNativeCallFunction>> {
+        debug_assert!(!self.module.is_pulley());
         let ptr = self
             .module
             .native_to_wasm_trampoline(index)?
@@ -1104,6 +1109,7 @@ impl crate::runtime::vm::ModuleRuntimeInfo for ModuleInner {
     }
 
     fn array_to_wasm_trampoline(&self, index: DefinedFuncIndex) -> Option<VMArrayCallFunction> {
+        debug_assert!(!self.module.is_pulley());
         let ptr = self.module.array_to_wasm_trampoline(index)?.as_ptr();
         Some(unsafe { mem::transmute::<*const u8, VMArrayCallFunction>(ptr) })
     }
@@ -1113,6 +1119,7 @@ impl crate::runtime::vm::ModuleRuntimeInfo for ModuleInner {
         signature: VMSharedTypeIndex,
     ) -> Option<NonNull<VMWasmCallFunction>> {
         log::trace!("Looking up trampoline for {signature:?}");
+        debug_assert!(!self.module.is_pulley());
         let trampoline_shared_ty = self.engine.signatures().trampoline_type(signature);
         let trampoline_module_ty = self
             .code
@@ -1193,21 +1200,25 @@ impl crate::runtime::vm::ModuleInfo for ModuleInner {
 /// CompiledModule does not exist (for example, for tests or for the
 /// default-callee instance).
 pub(crate) struct BareModuleInfo {
+    is_interpreter: bool,
     module: Arc<wasmtime_environ::Module>,
     one_signature: Option<VMSharedTypeIndex>,
     offsets: VMOffsets<HostPtr>,
 }
 
 impl BareModuleInfo {
-    pub(crate) fn empty(module: Arc<wasmtime_environ::Module>) -> Self {
-        BareModuleInfo::maybe_imported_func(module, None)
+    pub(crate) fn empty(engine: &Engine, module: Arc<wasmtime_environ::Module>) -> Self {
+        BareModuleInfo::maybe_imported_func(engine, module, None)
     }
 
     pub(crate) fn maybe_imported_func(
+        engine: &Engine,
         module: Arc<wasmtime_environ::Module>,
         one_signature: Option<VMSharedTypeIndex>,
     ) -> Self {
         BareModuleInfo {
+            is_interpreter: engine.compiler().triple().architecture
+                == target_lexicon::Architecture::Pbc64,
             offsets: VMOffsets::new(HostPtr, &module),
             module,
             one_signature,
@@ -1222,6 +1233,10 @@ impl BareModuleInfo {
 impl crate::runtime::vm::ModuleRuntimeInfo for BareModuleInfo {
     fn module(&self) -> &Arc<wasmtime_environ::Module> {
         &self.module
+    }
+
+    fn is_interpreter(&self) -> bool {
+        self.is_interpreter
     }
 
     fn engine_type_index(

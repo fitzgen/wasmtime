@@ -66,10 +66,10 @@ pub use crate::runtime::vm::sys::unwind::UnwindRegistration;
 pub use crate::runtime::vm::table::{Table, TableElement};
 pub use crate::runtime::vm::traphandlers::*;
 pub use crate::runtime::vm::vmcontext::{
-    VMArrayCallFunction, VMArrayCallHostFuncContext, VMContext, VMFuncRef, VMFunctionBody,
-    VMFunctionImport, VMGlobalDefinition, VMGlobalImport, VMMemoryDefinition, VMMemoryImport,
-    VMNativeCallFunction, VMNativeCallHostFuncContext, VMOpaqueContext, VMRuntimeLimits,
-    VMTableImport, VMWasmCallFunction, ValRaw,
+    UnpackedFuncRefPayload, VMArrayCallFunction, VMArrayCallHostFuncContext, VMContext, VMFuncRef,
+    VMFuncRefTrampolines, VMFunctionBody, VMFunctionImport, VMGlobalDefinition, VMGlobalImport,
+    VMMemoryDefinition, VMMemoryImport, VMNativeCallFunction, VMNativeCallHostFuncContext,
+    VMOpaqueContext, VMRuntimeLimits, VMTableImport, VMWasmCallFunction, ValRaw,
 };
 pub use send_sync_ptr::SendSyncPtr;
 
@@ -185,6 +185,9 @@ pub unsafe trait Store {
 pub trait ModuleRuntimeInfo: Send + Sync + 'static {
     /// The underlying Module.
     fn module(&self) -> &Arc<wasmtime_environ::Module>;
+
+    /// TODO FITZGEN
+    fn is_interpreter(&self) -> bool;
 
     /// Translate a module-level interned type index into an engine-level
     /// interned type index.

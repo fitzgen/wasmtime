@@ -5,7 +5,7 @@ use crate::ir;
 use crate::isa::pbc64::inst::*;
 use crate::trace;
 use cranelift_control::ControlPlane;
-use cranelift_pulley::encode;
+use cranelift_pulley::encode as enc;
 use regalloc2::Allocation;
 
 pub struct EmitInfo {
@@ -96,8 +96,7 @@ impl MachInstEmit for Inst {
         let end = sink.cur_offset();
         assert!(
             (end - start) <= Inst::worst_case_size(),
-            "Inst:{:?} length:{} worst_case_size:{}",
-            self,
+            "encoded inst {self:?} longer than worst-case size: length: {}, Inst::worst_case_size() = {}",
             end - start,
             Inst::worst_case_size()
         );
@@ -108,6 +107,8 @@ impl MachInstEmit for Inst {
         self.print_with_state(state, &mut allocs)
     }
 }
+
+const LABEL_PLACEHOLDER: i32 = 0x42424242;
 
 fn pbc64_emit(
     inst: &Inst,
@@ -121,33 +122,129 @@ fn pbc64_emit(
         // Pseduo-instructions that don't actually encode to anything.
         Inst::Args { .. } | Inst::Rets { .. } | Inst::Unwind { .. } => {}
 
-        Inst::Trap => todo!(),
+        Inst::Trap { code } => {
+            sink.add_trap(*code);
+            enc::trap(&mut data);
+        }
 
         Inst::Nop => todo!(),
 
-        Inst::Ret => encode::ret(&mut data),
+        Inst::Ret => enc::ret(&mut data),
 
         Inst::Jump { label } => {
-            sink.use_label_at_offset(start_offset, *label, LabelUse::Jump);
+            sink.use_label_at_offset(start_offset + 1, *label, LabelUse::Jump);
             sink.add_uncond_branch(start_offset, start_offset + 5, *label);
-            encode::jump(&mut data, 0);
+            enc::jump(&mut data, LABEL_PLACEHOLDER);
         }
 
-        Inst::Xmov { dst, src } => todo!(),
+        Inst::BrIf {
+            c,
+            taken,
+            not_taken,
+        } => {
+            // If taken.
+            let taken_start = start_offset + 1;
+            let taken_end = taken_start + 4;
+
+            sink.use_label_at_offset(taken_start, *taken, LabelUse::Jump);
+            let mut inverted = SmallVec::<[u8; 16]>::new();
+            enc::br_if_not(&mut inverted, c.into(), LABEL_PLACEHOLDER);
+            sink.add_cond_branch(start_offset, taken_end, *taken, &inverted);
+            enc::br_if(&mut data, c.into(), LABEL_PLACEHOLDER);
+
+            // If not taken.
+            let not_taken_start = sink.cur_offset() + 1;
+            let not_taken_end = not_taken_start + 4;
+
+            sink.use_label_at_offset(not_taken_start, *not_taken, LabelUse::Jump);
+            sink.add_uncond_branch(sink.cur_offset(), not_taken_end, *not_taken);
+            enc::jump(&mut data, LABEL_PLACEHOLDER);
+        }
+
+        Inst::Xmov { dst, src } => enc::xmov(&mut data, dst.into(), src.into()),
         Inst::Fmov { dst, src } => todo!(),
         Inst::Vmov { dst, src } => todo!(),
 
-        Inst::Xconst8 { dst, imm } => todo!(),
-        Inst::Xconst16 { dst, imm } => todo!(),
-        Inst::Xconst32 { dst, imm } => todo!(),
-        Inst::Xconst64 { dst, imm } => todo!(),
+        Inst::Xconst8 { dst, imm } => enc::xconst8(&mut data, dst.into(), *imm),
+        Inst::Xconst16 { dst, imm } => enc::xconst16(&mut data, dst.into(), *imm),
+        Inst::Xconst32 { dst, imm } => enc::xconst32(&mut data, dst.into(), *imm),
+        Inst::Xconst64 { dst, imm } => enc::xconst64(&mut data, dst.into(), *imm),
 
         Inst::Xadd32 { dst, src1, src2 } => {
-            encode::xadd32(&mut data, dst.into(), src1.into(), src2.into())
+            enc::xadd32(&mut data, dst.into(), src1.into(), src2.into())
         }
         Inst::Xadd64 { .. } => todo!(),
 
-        Inst::Load { .. } => todo!(),
+        Inst::Load {
+            dst,
+            mem,
+            ty,
+            flags,
+            ext,
+        } => {
+            use ExtKind as X;
+            let r = mem.get_base_register().unwrap();
+            let r = cranelift_pulley::regs::XReg::new(r.to_real_reg().unwrap().hw_enc()).unwrap();
+            let dst =
+                cranelift_pulley::regs::XReg::new(dst.to_reg().to_real_reg().unwrap().hw_enc())
+                    .unwrap();
+            let x = mem.get_offset_with_state(state);
+            match (
+                *ext,
+                *ty,
+                i8::try_from(x),
+                i16::try_from(x),
+                i32::try_from(x),
+            ) {
+                (X::Sign, types::I32, Ok(0), _, _) => enc::load32_s(&mut data, dst, r),
+                (X::Sign, types::I32, Ok(x), _, _) => enc::load32_s_offset8(&mut data, dst, r, x),
+                (X::Sign, types::I32, _, Ok(x), _) => enc::load32_s_offset16(&mut data, dst, r, x),
+                (X::Sign, types::I32, _, _, Ok(x)) => enc::load32_s_offset32(&mut data, dst, r, x),
+                (X::Sign, types::I32, _, _, _) => enc::load32_s_offset64(&mut data, dst, r, x),
+
+                (X::Zero, types::I32, Ok(0), _, _) => enc::load32_u(&mut data, dst, r),
+                (X::Zero, types::I32, Ok(x), _, _) => enc::load32_u_offset8(&mut data, dst, r, x),
+                (X::Zero, types::I32, _, Ok(x), _) => enc::load32_u_offset16(&mut data, dst, r, x),
+                (X::Zero, types::I32, _, _, Ok(x)) => enc::load32_u_offset32(&mut data, dst, r, x),
+                (X::Zero, types::I32, _, _, _) => enc::load32_u_offset64(&mut data, dst, r, x),
+
+                (_, types::I64, Ok(0), _, _) => enc::load64(&mut data, dst, r),
+                (_, types::I64, Ok(x), _, _) => enc::load64_offset8(&mut data, dst, r, x),
+                (_, types::I64, _, Ok(x), _) => enc::load64_offset16(&mut data, dst, r, x),
+                (_, types::I64, _, _, Ok(x)) => enc::load64_offset32(&mut data, dst, r, x),
+                (_, types::I64, _, _, _) => enc::load64_offset64(&mut data, dst, r, x),
+
+                (..) => unimplemented!("load ext={ext:?} ty={ty}"),
+            }
+        }
+
+        Inst::Store {
+            mem,
+            src,
+            ty,
+            flags,
+        } => {
+            let r = mem.get_base_register().unwrap();
+            let r = cranelift_pulley::regs::XReg::new(r.to_real_reg().unwrap().hw_enc()).unwrap();
+            let src =
+                cranelift_pulley::regs::XReg::new(src.to_real_reg().unwrap().hw_enc()).unwrap();
+            let x = mem.get_offset_with_state(state);
+            match (*ty, i8::try_from(x), i16::try_from(x), i32::try_from(x)) {
+                (types::I32, Ok(0), _, _) => enc::store32(&mut data, r, src),
+                (types::I32, Ok(x), _, _) => enc::store32_offset8(&mut data, r, x, src),
+                (types::I32, _, Ok(x), _) => enc::store32_offset16(&mut data, r, x, src),
+                (types::I32, _, _, Ok(x)) => enc::store32_offset32(&mut data, r, x, src),
+                (types::I32, _, _, _) => enc::store32_offset64(&mut data, r, x, src),
+
+                (types::I64, Ok(0), _, _) => enc::store64(&mut data, r, src),
+                (types::I64, Ok(x), _, _) => enc::store64_offset8(&mut data, r, x, src),
+                (types::I64, _, Ok(x), _) => enc::store64_offset16(&mut data, r, x, src),
+                (types::I64, _, _, Ok(x)) => enc::store64_offset32(&mut data, r, x, src),
+                (types::I64, _, _, _) => enc::store64_offset64(&mut data, r, x, src),
+
+                (..) => todo!(),
+            }
+        }
 
         Inst::BitcastIntFromFloat32 { dst, src } => todo!(),
         Inst::BitcastIntFromFloat64 { dst, src } => todo!(),

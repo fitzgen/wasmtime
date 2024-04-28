@@ -6,7 +6,7 @@ use crate::runtime::vm::GcRuntime;
 use crate::sync::OnceLock;
 use crate::Config;
 use alloc::sync::Arc;
-use anyhow::{Context, Result};
+use anyhow::{ensure, Context, Result};
 use core::sync::atomic::{AtomicU64, Ordering};
 #[cfg(any(feature = "cranelift", feature = "winch"))]
 use object::write::{Object, StandardSegment};
@@ -258,7 +258,10 @@ impl Engine {
 
             // Check to see that the config's target matches the host
             let target = compiler.triple();
-            if *target != target_lexicon::Triple::host() {
+
+            if *target != target_lexicon::Triple::host()
+                && target.architecture != target_lexicon::Architecture::Pbc64
+            {
                 return Err(format!(
                     "target '{}' specified in the configuration does not match the host",
                     target

@@ -534,7 +534,7 @@ impl<T> Store<T> {
         // is never null.
         inner.default_caller = {
             let module = Arc::new(wasmtime_environ::Module::default());
-            let shim = BareModuleInfo::empty(module).into_traitobj();
+            let shim = BareModuleInfo::empty(engine, module).into_traitobj();
             let allocator = OnDemandInstanceAllocator::default();
             allocator
                 .validate_module(shim.module(), shim.offsets())

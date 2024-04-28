@@ -1,6 +1,6 @@
 //! Unwind information for pbc64.
 
-use crate::isa::riscv64::inst::regs;
+use crate::isa::pbc64::inst::regs;
 use crate::isa::unwind::systemv::RegisterMappingError;
 use crate::machinst::Reg;
 use gimli::{

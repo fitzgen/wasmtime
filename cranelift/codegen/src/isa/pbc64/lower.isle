@@ -14,15 +14,20 @@
 (rule (lower_branch (jump _) (single_target label))
       (emit_side_effect (pbc_jump label)))
 
-;; ;; Conditional branches.
-;; (rule (lower_branch (brif v _ _) (two_targets then else))
-;;       (emit_side_effect (cond_br (is_nonzero_cmp v) then else)))
+;; Conditional branches.
+(rule (lower_branch (brif c _ _) (two_targets then else))
+      (emit_side_effect (pbc_br_if c then else)))
 
 ;; Branch tables.
 (decl lower_br_table (Reg MachLabelSlice) Unit)
 (extern constructor lower_br_table lower_br_table)
 (rule (lower_branch (br_table index _) targets)
       (lower_br_table index targets))
+
+;;;; Rules for `trap` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule (lower (trap code))
+      (side_effect (pbc_trap code)))
 
 ;;;; Rules for `return` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -67,4 +72,16 @@
 
 ;;;; Rules for `load` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(rule (lower (has_type ty (load flags addr (offset32 offset))))
+      (pbc_load (Amode.RegOffset addr (i32_as_i64 offset))
+                ty
+                flags
+                (ExtKind.Zero)))
+
 ;;;; Rules for `store` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule (lower (store flags src @ (value_type ty) addr (offset32 offset)))
+      (side_effect (pbc_store (Amode.RegOffset addr (i32_as_i64 offset))
+                              src
+                              ty
+                              flags)))

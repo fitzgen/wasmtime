@@ -54,7 +54,8 @@ impl FuncRefs {
     /// You may only access the return value on the same thread as this
     /// `FuncRefs` and only while the store holding this `FuncRefs` exists.
     pub unsafe fn push(&mut self, func_ref: VMFuncRef) -> NonNull<VMFuncRef> {
-        debug_assert!(func_ref.wasm_call.is_none());
+        debug_assert!(func_ref.payload.is_missing_wasm_call());
+
         // Debug assert that the vmctx is a `VMNativeCallHostFuncContext` as
         // that is the only kind that can have holes.
         let _ = unsafe { VMNativeCallHostFuncContext::from_opaque(func_ref.vmctx) };
@@ -71,14 +72,15 @@ impl FuncRefs {
         self.with_holes.retain_mut(|f| {
             unsafe {
                 let func_ref = f.as_mut();
-                debug_assert!(func_ref.wasm_call.is_none());
+                debug_assert!(func_ref.payload.is_missing_wasm_call());
 
                 // Debug assert that the vmctx is a `VMNativeCallHostFuncContext` as
                 // that is the only kind that can have holes.
                 let _ = VMNativeCallHostFuncContext::from_opaque(func_ref.vmctx);
 
-                func_ref.wasm_call = modules.wasm_to_native_trampoline(func_ref.type_index);
-                func_ref.wasm_call.is_none()
+                func_ref.payload.unwrap_trampolines_mut().wasm_call =
+                    modules.wasm_to_native_trampoline(func_ref.type_index);
+                func_ref.payload.is_missing_wasm_call()
             }
         });
     }

@@ -141,6 +141,9 @@ cranelift = ["dep:wasmtime-cranelift", "std"]
 # and shouldn't be used in production applications.
 winch = ["dep:wasmtime-winch", "std"]
 
+# TODO FITZGEN
+pulley = ["wasmtime-cranelift?/pbc64"]
+
 # Enables support for incremental compilation cache to be enabled in `Config`.
 incremental-cache = ["wasmtime-cranelift?/incremental-cache", "std"]
 
@@ -177,7 +180,7 @@ pooling-allocator = ["runtime", "std"]
 # Enables support for all architectures in Cranelift, allowing
 # cross-compilation using the `wasmtime` crate's API, notably the
 # `Engine::precompile_module` function.
-all-arch = ["wasmtime-cranelift?/all-arch", "wasmtime-winch?/all-arch"]
+all-arch = ["wasmtime-cranelift?/all-arch", "wasmtime-winch?/all-arch", "pulley"]
 
 # Enables in-progress support for the component model. Note that this feature is
 # in-progress, buggy, and incomplete. This is primarily here for internal

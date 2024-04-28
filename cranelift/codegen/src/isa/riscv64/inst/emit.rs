@@ -417,7 +417,6 @@ impl Inst {
                 }
                 sink.put2(0x0000);
             }
-
             // c.addi16sp
             //
             // c.addi16sp shares the opcode with c.lui, but has a destination field of x2.
