@@ -17,6 +17,8 @@ use smallvec::SmallVec;
 #[cfg(feature = "async")]
 use wasmtime_fiber::FiberStack;
 
+mod madvisev;
+
 pub struct DecommitQueue {
     batch_size: usize,
     raw: SmallVec<[libc::iovec; 2]>,
@@ -142,12 +144,10 @@ impl DecommitQueue {
     }
 
     fn decommit_all_raw(&mut self) {
-        for iovec in self.raw.drain(..) {
-            unsafe {
-                crate::vm::sys::vm::decommit_pages(iovec.iov_base.cast(), iovec.iov_len)
-                    .expect("failed to decommit pages");
-            }
+        for chunk in self.raw.chunks(1024) {
+            unsafe { madvisev::madvisev(chunk, libc::MADV_DONTNEED) }
         }
+        self.raw.clear();
     }
 
     /// Flush this queue
