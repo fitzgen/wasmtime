@@ -470,11 +470,15 @@ impl MemoryImageSlot {
     /// process's memory on Linux. Up to that much memory will be `memset` to
     /// zero where the rest of it will be reset or released with `madvise`.
     #[allow(dead_code)] // ignore warnings as this is only used in some cfgs
-    pub(crate) fn clear_and_remain_ready(&mut self, keep_resident: usize) -> Result<()> {
+    pub(crate) fn clear_and_remain_ready(
+        &mut self,
+        keep_resident: usize,
+        decommit: impl FnMut(*mut u8, usize),
+    ) -> Result<()> {
         assert!(self.dirty);
 
         unsafe {
-            self.reset_all_memory_contents(keep_resident)?;
+            self.reset_all_memory_contents(keep_resident, decommit)?;
         }
 
         self.dirty = false;
@@ -482,7 +486,11 @@ impl MemoryImageSlot {
     }
 
     #[allow(dead_code)] // ignore warnings as this is only used in some cfgs
-    unsafe fn reset_all_memory_contents(&mut self, keep_resident: usize) -> Result<()> {
+    unsafe fn reset_all_memory_contents(
+        &mut self,
+        keep_resident: usize,
+        decommit: impl FnMut(*mut u8, usize),
+    ) -> Result<()> {
         match vm::decommit_behavior() {
             DecommitBehavior::Zero => {
                 // If we're not on Linux then there's no generic platform way to
@@ -494,13 +502,18 @@ impl MemoryImageSlot {
                 self.reset_with_anon_memory()
             }
             DecommitBehavior::RestoreOriginalMapping => {
-                self.reset_with_original_mapping(keep_resident)
+                self.reset_with_original_mapping(keep_resident, decommit);
+                Ok(())
             }
         }
     }
 
     #[allow(dead_code)] // ignore warnings as this is only used in some cfgs
-    unsafe fn reset_with_original_mapping(&mut self, keep_resident: usize) -> Result<()> {
+    unsafe fn reset_with_original_mapping(
+        &mut self,
+        keep_resident: usize,
+        mut decommit: impl FnMut(*mut u8, usize),
+    ) {
         match &self.image {
             Some(image) => {
                 assert!(self.accessible >= image.linear_memory_offset + image.len);
@@ -544,7 +557,11 @@ impl MemoryImageSlot {
                     ptr::write_bytes(self.base.as_ptr(), 0u8, image.linear_memory_offset);
 
                     // This is madvise (2)
-                    self.restore_original_mapping(image.linear_memory_offset, image.len)?;
+                    self.restore_original_mapping(
+                        image.linear_memory_offset,
+                        image.len,
+                        &mut decommit,
+                    );
 
                     // This is memset (3)
                     ptr::write_bytes(self.base.as_ptr().add(image_end), 0u8, remaining_memset);
@@ -553,7 +570,8 @@ impl MemoryImageSlot {
                     self.restore_original_mapping(
                         image_end + remaining_memset,
                         mem_after_image - remaining_memset,
-                    )?;
+                        &mut decommit,
+                    );
                 } else {
                     // If the image starts after the `keep_resident` threshold
                     // then we memset the start of linear memory and then use
@@ -578,7 +596,11 @@ impl MemoryImageSlot {
                     ptr::write_bytes(self.base.as_ptr(), 0u8, keep_resident);
 
                     // This is madvise (2)
-                    self.restore_original_mapping(keep_resident, self.accessible - keep_resident)?;
+                    self.restore_original_mapping(
+                        keep_resident,
+                        self.accessible - keep_resident,
+                        decommit,
+                    );
                 }
             }
 
@@ -588,26 +610,32 @@ impl MemoryImageSlot {
             None => {
                 let size_to_memset = keep_resident.min(self.accessible);
                 ptr::write_bytes(self.base.as_ptr(), 0u8, size_to_memset);
-                self.restore_original_mapping(size_to_memset, self.accessible - size_to_memset)?;
+                self.restore_original_mapping(
+                    size_to_memset,
+                    self.accessible - size_to_memset,
+                    decommit,
+                );
             }
         }
-
-        Ok(())
     }
 
     #[allow(dead_code)] // ignore warnings as this is only used in some cfgs
-    unsafe fn restore_original_mapping(&self, base: usize, len: usize) -> Result<()> {
+    unsafe fn restore_original_mapping(
+        &self,
+        base: usize,
+        len: usize,
+        mut decommit: impl FnMut(*mut u8, usize),
+    ) {
         assert!(base + len <= self.accessible);
         if len == 0 {
-            return Ok(());
+            return;
         }
 
         assert_eq!(
             vm::decommit_behavior(),
             DecommitBehavior::RestoreOriginalMapping
         );
-        vm::decommit_pages(self.base.as_ptr().add(base), len).err2anyhow()?;
-        Ok(())
+        decommit(self.base.as_ptr().add(base), len);
     }
 
     fn set_protection(&self, range: Range<usize>, readwrite: bool) -> Result<()> {

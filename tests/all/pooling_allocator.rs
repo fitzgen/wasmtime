@@ -430,13 +430,7 @@ fn total_core_instances_limit() -> Result<()> {
 
         match Instance::new(&mut store, &module, &[]) {
             Ok(_) => panic!("instantiation should fail"),
-            Err(e) => assert_eq!(
-                e.to_string(),
-                format!(
-                    "maximum concurrent core instance limit of {} reached",
-                    INSTANCE_LIMIT
-                )
-            ),
+            Err(e) => assert!(e.is::<PoolConcurrencyLimitError>()),
         }
     }
 
@@ -650,7 +644,7 @@ fn instance_too_large() -> Result<()> {
     let engine = Engine::new(&config)?;
     let expected = if cfg!(feature = "wmemcheck") {
         "\
-instance allocation for this module requires 336 bytes which exceeds the \
+        instance allocation for this module requires 336 bytes which exceeds the \
 configured maximum of 16 bytes; breakdown of allocation requirement:
 
  * 76.19% - 256 bytes - instance state management
@@ -867,13 +861,7 @@ fn total_component_instances_limit() -> Result<()> {
 
     match linker.instantiate(&mut store, &component) {
         Ok(_) => panic!("should have hit component instance limit"),
-        Err(e) => assert_eq!(
-            e.to_string(),
-            format!(
-                "maximum concurrent component instance limit of {} reached",
-                TOTAL_COMPONENT_INSTANCES
-            ),
-        ),
+        Err(e) => assert!(e.is::<PoolConcurrencyLimitError>()),
     }
 
     drop(store);
@@ -929,10 +917,7 @@ fn total_tables_limit() -> Result<()> {
 
     match linker.instantiate(&mut store, &module) {
         Ok(_) => panic!("should have hit table limit"),
-        Err(e) => assert_eq!(
-            e.to_string(),
-            format!("maximum concurrent table limit of {} reached", TOTAL_TABLES),
-        ),
+        Err(e) => assert!(e.is::<PoolConcurrencyLimitError>()),
     }
 
     drop(store);
@@ -1006,10 +991,7 @@ async fn total_stacks_limit() -> Result<()> {
     let mut store3 = Store::new(&engine, ());
     match linker.instantiate_async(&mut store3, &module).await {
         Ok(_) => panic!("should have hit stack limit"),
-        Err(e) => assert_eq!(
-            e.to_string(),
-            format!("maximum concurrent fiber limit of {} reached", TOTAL_STACKS),
-        ),
+        Err(e) => assert!(e.is::<PoolConcurrencyLimitError>()),
     }
 
     // Finish the futures and return their Wasm stacks to the pool.
@@ -1185,13 +1167,7 @@ fn total_memories_limit() -> Result<()> {
 
     match linker.instantiate(&mut store, &module) {
         Ok(_) => panic!("should have hit memory limit"),
-        Err(e) => assert_eq!(
-            e.to_string(),
-            format!(
-                "maximum concurrent memory limit of {} reached for stripe 0",
-                TOTAL_MEMORIES
-            ),
-        ),
+        Err(e) => assert!(e.is::<PoolConcurrencyLimitError>()),
     }
 
     drop(store);

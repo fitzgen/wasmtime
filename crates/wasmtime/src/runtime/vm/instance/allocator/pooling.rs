@@ -18,6 +18,7 @@
 //! item is stored in its own separate pool: [`memory_pool`], [`table_pool`],
 //! [`stack_pool`]. See those modules for more details.
 
+mod decommit_queue;
 mod index_allocator;
 mod memory_pool;
 mod table_pool;
@@ -39,6 +40,7 @@ cfg_if::cfg_if! {
     }
 }
 
+use self::decommit_queue::DecommitQueue;
 use self::memory_pool::MemoryPool;
 use self::table_pool::TablePool;
 use super::{
@@ -51,6 +53,9 @@ use crate::runtime::vm::{
     CompiledModuleId, Memory, Table,
 };
 use anyhow::{bail, Result};
+use std::borrow::Cow;
+use std::fmt::Display;
+use std::sync::{Mutex, MutexGuard};
 use std::{
     mem,
     sync::atomic::{AtomicU64, Ordering},
@@ -174,6 +179,11 @@ impl Default for InstanceLimits {
 pub struct PoolingInstanceAllocatorConfig {
     /// See `PoolingAllocatorConfig::max_unused_warm_slots` in `wasmtime`
     pub max_unused_warm_slots: u32,
+    /// The target number of decommits to do per batch. This is not precise, as
+    /// we can queue up decommits at times when we aren't prepared to
+    /// immediately flush them, and so we may go over this target size
+    /// occasionally.
+    pub decommit_batch_size: u32,
     /// The size, in bytes, of async stacks to allocate (not including the guard
     /// page).
     pub stack_size: usize,
@@ -207,6 +217,7 @@ impl Default for PoolingInstanceAllocatorConfig {
     fn default() -> PoolingInstanceAllocatorConfig {
         PoolingInstanceAllocatorConfig {
             max_unused_warm_slots: 100,
+            decommit_batch_size: 1,
             stack_size: 2 << 20,
             limits: InstanceLimits::default(),
             async_stack_zeroing: false,
@@ -215,6 +226,34 @@ impl Default for PoolingInstanceAllocatorConfig {
             table_keep_resident: 0,
             memory_protection_keys: MpkEnabled::Disable,
             max_memory_protection_keys: 16,
+        }
+    }
+}
+
+/// An error returned when the pooling allocator cannot allocate a table,
+/// memory, etc... because the maximum number of concurrent allocations for that
+/// entity has been reached.
+#[derive(Debug)]
+pub struct PoolConcurrencyLimitError {
+    limit: usize,
+    kind: Cow<'static, str>,
+}
+
+impl std::error::Error for PoolConcurrencyLimitError {}
+
+impl Display for PoolConcurrencyLimitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let limit = self.limit;
+        let kind = &self.kind;
+        write!(f, "maximum concurrent limit of {limit} for {kind} reached")
+    }
+}
+
+impl PoolConcurrencyLimitError {
+    fn new(limit: usize, kind: impl Into<Cow<'static, str>>) -> Self {
+        Self {
+            limit,
+            kind: kind.into(),
         }
     }
 }
@@ -240,6 +279,7 @@ pub struct PoolingInstanceAllocator {
     live_core_instances: AtomicU64,
     live_component_instances: AtomicU64,
 
+    decommit_queue: Mutex<DecommitQueue>,
     memories: MemoryPool,
     tables: TablePool,
 
@@ -273,6 +313,7 @@ impl PoolingInstanceAllocator {
             limits: config.limits,
             live_component_instances: AtomicU64::new(0),
             live_core_instances: AtomicU64::new(0),
+            decommit_queue: Mutex::new(DecommitQueue::new(config.decommit_batch_size)),
             memories: MemoryPool::new(config, tunables)?,
             tables: TablePool::new(config)?,
             #[cfg(feature = "gc")]
@@ -370,6 +411,14 @@ impl PoolingInstanceAllocator {
             self.limits.component_instance_size
         )
     }
+
+    fn flush_decommit_queue(&self, mut locked_queue: MutexGuard<'_, DecommitQueue>) {
+        // First, take the queue out of the mutex and drop the lock, to minimize
+        // contention.
+        let queue = locked_queue.take();
+        drop(locked_queue);
+        queue.flush(self);
+    }
 }
 
 unsafe impl InstanceAllocatorImpl for PoolingInstanceAllocator {
@@ -450,10 +499,11 @@ unsafe impl InstanceAllocatorImpl for PoolingInstanceAllocator {
         let old_count = self.live_component_instances.fetch_add(1, Ordering::AcqRel);
         if old_count >= u64::from(self.limits.total_component_instances) {
             self.decrement_component_instance_count();
-            bail!(
-                "maximum concurrent component instance limit of {} reached",
-                self.limits.total_component_instances
-            );
+            return Err(PoolConcurrencyLimitError::new(
+                usize::try_from(self.limits.total_component_instances).unwrap(),
+                "component instances",
+            )
+            .into());
         }
         Ok(())
     }
@@ -466,10 +516,11 @@ unsafe impl InstanceAllocatorImpl for PoolingInstanceAllocator {
         let old_count = self.live_core_instances.fetch_add(1, Ordering::AcqRel);
         if old_count >= u64::from(self.limits.total_core_instances) {
             self.decrement_core_instance_count();
-            bail!(
-                "maximum concurrent core instance limit of {} reached",
-                self.limits.total_core_instances
-            );
+            return Err(PoolConcurrencyLimitError::new(
+                usize::try_from(self.limits.total_core_instances).unwrap(),
+                "core instances",
+            )
+            .into());
         }
         Ok(())
     }
@@ -484,7 +535,17 @@ unsafe impl InstanceAllocatorImpl for PoolingInstanceAllocator {
         memory_plan: &MemoryPlan,
         memory_index: DefinedMemoryIndex,
     ) -> Result<(MemoryAllocationIndex, Memory)> {
-        self.memories.allocate(request, memory_plan, memory_index)
+        self.memories
+            .allocate(request, memory_plan, memory_index)
+            .or_else(|e| {
+                if e.is::<PoolConcurrencyLimitError>() {
+                    let queue = self.decommit_queue.lock().unwrap();
+                    self.flush_decommit_queue(queue);
+                    self.memories.allocate(request, memory_plan, memory_index)
+                } else {
+                    Err(e)
+                }
+            })
     }
 
     unsafe fn deallocate_memory(
@@ -493,7 +554,41 @@ unsafe impl InstanceAllocatorImpl for PoolingInstanceAllocator {
         allocation_index: MemoryAllocationIndex,
         memory: Memory,
     ) {
-        self.memories.deallocate(allocation_index, memory);
+        // Reset the image slot. If there is any error clearing the
+        // image, just drop it here, and let the drop handler for the
+        // slot unmap in a way that retains the address space
+        // reservation.
+        let mut image = memory.unwrap_static_image();
+
+        let mut any_enqueued = false;
+        let mut queue_is_full = false;
+        let mut queue = self.decommit_queue.lock().unwrap();
+
+        image
+            .clear_and_remain_ready(self.memories.keep_resident, |ptr, len| {
+                any_enqueued = true;
+                queue_is_full |= queue.enqueue_raw(ptr, len);
+            })
+            .expect("failed to reset memory image");
+
+        if any_enqueued {
+            // If we enqueued parts of this memory for batched decommit, then
+            // don't return this index to the memory pool's free list yet
+            // because this slot isn't ready for reuse until the queue is
+            // flushed.
+            queue.push_memory(allocation_index, image);
+
+            // If the queue reached capacity, then flush it.
+            if queue_is_full {
+                self.flush_decommit_queue(queue);
+            }
+        } else {
+            // If we didn't enqueue any regions for decommit, then we must have
+            // either memset the whole memory or eagerly remapped it to zero
+            // because we don't have linux's `madvise(DONTNEED)` semantics. In
+            // either case, the memory slot is ready for reuse immediately.
+            self.memories.deallocate(allocation_index, image);
+        }
     }
 
     unsafe fn allocate_table(
@@ -502,26 +597,75 @@ unsafe impl InstanceAllocatorImpl for PoolingInstanceAllocator {
         table_plan: &TablePlan,
         _table_index: DefinedTableIndex,
     ) -> Result<(super::TableAllocationIndex, Table)> {
-        self.tables.allocate(request, table_plan)
+        self.tables.allocate(request, table_plan).or_else(|e| {
+            if e.is::<PoolConcurrencyLimitError>() {
+                let queue = self.decommit_queue.lock().unwrap();
+                self.flush_decommit_queue(queue);
+                self.tables.allocate(request, table_plan)
+            } else {
+                Err(e)
+            }
+        })
     }
 
     unsafe fn deallocate_table(
         &self,
         _table_index: DefinedTableIndex,
         allocation_index: TableAllocationIndex,
-        table: Table,
+        mut table: Table,
     ) {
-        self.tables.deallocate(allocation_index, table);
+        let mut any_enqueued = false;
+        let mut queue_is_full = false;
+        let mut queue = self.decommit_queue.lock().unwrap();
+
+        self.tables
+            .reset_table_pages_to_zero(allocation_index, &mut table, |ptr, len| {
+                any_enqueued = true;
+                queue_is_full |= queue.enqueue_raw(ptr, len);
+            });
+
+        if any_enqueued {
+            queue.push_table(allocation_index, table);
+            if queue_is_full {
+                self.flush_decommit_queue(queue);
+            }
+        } else {
+            self.tables.deallocate(allocation_index, table);
+        }
     }
 
     #[cfg(feature = "async")]
     fn allocate_fiber_stack(&self) -> Result<wasmtime_fiber::FiberStack> {
-        self.stacks.allocate()
+        self.stacks.allocate().or_else(|e| {
+            if e.is::<PoolConcurrencyLimitError>() {
+                let queue = self.decommit_queue.lock().unwrap();
+                self.flush_decommit_queue(queue);
+                self.stacks.allocate()
+            } else {
+                Err(e)
+            }
+        })
     }
 
     #[cfg(feature = "async")]
-    unsafe fn deallocate_fiber_stack(&self, stack: &wasmtime_fiber::FiberStack) {
-        self.stacks.deallocate(stack);
+    unsafe fn deallocate_fiber_stack(&self, mut stack: wasmtime_fiber::FiberStack) {
+        let mut any_enqueued = false;
+        let mut queue_is_full = false;
+        let mut queue = self.decommit_queue.lock().unwrap();
+
+        self.stacks.zero_stack(&mut stack, |ptr, len| {
+            any_enqueued = true;
+            queue_is_full |= queue.enqueue_raw(ptr, len);
+        });
+
+        if any_enqueued {
+            queue.push_stack(stack);
+            if queue_is_full {
+                self.flush_decommit_queue(queue);
+            }
+        } else {
+            self.stacks.deallocate(stack);
+        }
     }
 
     fn purge_module(&self, module: CompiledModuleId) {

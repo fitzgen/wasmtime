@@ -1,4 +1,5 @@
 use anyhow::Error;
+use core::{mem, ptr};
 use std::any::Any;
 use std::cell::Cell;
 use std::io;
@@ -60,6 +61,12 @@ impl FiberStack {
     /// supports it.
     pub fn range(&self) -> Option<Range<usize>> {
         self.0.range()
+    }
+
+    /// Is this a manually-managed stack created from raw parts? If so, it is up
+    /// to whoever created it to manage the stack's memory allocation.
+    pub fn is_from_raw_parts(&self) -> bool {
+        self.0.is_from_raw_parts()
     }
 }
 
@@ -159,6 +166,13 @@ impl<'a, Resume, Yield, Return> Fiber<'a, Resume, Yield, Return> {
     /// Gets the stack associated with this fiber.
     pub fn stack(&self) -> &FiberStack {
         &self.stack
+    }
+
+    /// When this fiber has finished executing, reclaim its stack.
+    pub fn into_stack(mut self) -> FiberStack {
+        assert!(self.done());
+        let null_stack = unsafe { FiberStack::from_raw_parts(ptr::null_mut(), 0).unwrap() };
+        mem::replace(&mut self.stack, null_stack)
     }
 }
 
