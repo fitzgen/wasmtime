@@ -2335,6 +2335,10 @@ impl FuncType {
         self.registered_type.unwrap_func()
     }
 
+    pub(crate) fn registered_type(&self) -> &RegisteredType {
+        &self.registered_type
+    }
+
     pub(crate) fn into_registered_type(self) -> RegisteredType {
         self.registered_type
     }

@@ -1,4 +1,4 @@
-use anyhow::{bail, Context};
+use anyhow::{bail, Context, Result};
 use bstr::ByteSlice;
 use libtest_mimic::{Arguments, FormatSetting, Trial};
 use once_cell::sync::Lazy;
@@ -29,6 +29,54 @@ fn main() {
     libtest_mimic::run(&args, trials).exit()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TestStrategy {
+    Cranelift,
+    Pulley,
+    Winch,
+}
+
+impl TestStrategy {
+    fn all() -> [TestStrategy; 3] {
+        [
+            TestStrategy::Cranelift,
+            TestStrategy::Pulley,
+            TestStrategy::Winch,
+        ]
+    }
+
+    fn uses_cranelift(&self) -> bool {
+        match self {
+            TestStrategy::Cranelift | TestStrategy::Pulley => true,
+            TestStrategy::Winch => false,
+        }
+    }
+
+    fn configure(&self, config: &mut Config) -> Result<()> {
+        match self {
+            TestStrategy::Cranelift => {
+                config.strategy(Strategy::Cranelift);
+                config.cranelift_debug_verifier(true);
+            }
+            TestStrategy::Pulley => {
+                config.strategy(Strategy::Cranelift);
+                config.cranelift_debug_verifier(true);
+
+                #[cfg(target_pointer_width = "32")]
+                config.target("pulley32")?;
+                #[cfg(target_pointer_width = "64")]
+                config.target("pulley64")?;
+                #[cfg(not(any(target_pointer_width = "32", target_pointer_width = "64")))]
+                compile_error!("unsupported target pointer width");
+            }
+            TestStrategy::Winch => {
+                config.strategy(Strategy::Winch);
+            }
+        }
+        Ok(())
+    }
+}
+
 fn add_tests(trials: &mut Vec<Trial>, path: &Path) {
     for entry in path.read_dir().unwrap() {
         let entry = entry.unwrap();
@@ -42,7 +90,7 @@ fn add_tests(trials: &mut Vec<Trial>, path: &Path) {
             continue;
         }
 
-        for strategy in [Strategy::Cranelift, Strategy::Winch] {
+        for strategy in TestStrategy::all() {
             for pooling in [true, false] {
                 let trial = Trial::test(
                     format!(
@@ -63,14 +111,21 @@ fn add_tests(trials: &mut Vec<Trial>, path: &Path) {
     }
 }
 
-fn should_fail(test: &Path, strategy: Strategy) -> bool {
+fn should_fail(test: &Path, strategy: TestStrategy) -> bool {
+    if strategy == TestStrategy::Pulley {
+        // Basically everything fails in Pulley right now, so selectively allow
+        // a couple tests rather than disallowing 99.99% of them.
+        let should_pass = test.starts_with("tests/misc_testsuite/pulley");
+        return !should_pass;
+    }
+
     // Winch only supports x86_64 at this time.
-    if strategy == Strategy::Winch && !cfg!(target_arch = "x86_64") {
+    if strategy == TestStrategy::Winch && !cfg!(target_arch = "x86_64") {
         return true;
     }
 
     // Disable spec tests for proposals that Winch does not implement yet.
-    if strategy == Strategy::Winch {
+    if strategy == TestStrategy::Winch {
         let unsupported = [
             // externref/reference-types related
             "component-model/modules.wast",
@@ -277,7 +332,7 @@ fn should_fail(test: &Path, strategy: Strategy) -> bool {
 // Each of the tests included from `wast_testsuite_tests` will call this
 // function which actually executes the `wast` test suite given the `strategy`
 // to compile it.
-fn run_wast(wast: &Path, strategy: Strategy, pooling: bool) -> anyhow::Result<()> {
+fn run_wast(wast: &Path, strategy: TestStrategy, pooling: bool) -> Result<()> {
     let should_fail = should_fail(wast, strategy);
     let wast_bytes =
         std::fs::read(wast).with_context(|| format!("failed to read `{}`", wast.display()))?;
@@ -305,11 +360,6 @@ fn run_wast(wast: &Path, strategy: Strategy, pooling: bool) -> anyhow::Result<()
         return Ok(());
     }
 
-    let is_cranelift = match strategy {
-        Strategy::Cranelift => true,
-        _ => false,
-    };
-
     let mut cfg = Config::new();
     cfg.wasm_multi_memory(multi_memory)
         .wasm_threads(threads)
@@ -320,18 +370,21 @@ fn run_wast(wast: &Path, strategy: Strategy, pooling: bool) -> anyhow::Result<()
         .wasm_relaxed_simd(relaxed_simd)
         .wasm_tail_call(tail_call)
         .wasm_custom_page_sizes(custom_page_sizes)
-        .wasm_extended_const(extended_const)
-        .strategy(strategy);
+        .wasm_extended_const(extended_const);
+    strategy.configure(&mut cfg)?;
 
-    if is_cranelift {
-        cfg.cranelift_debug_verifier(true);
+    if strategy == TestStrategy::Pulley && !wast.starts_with("tests/misc_testsuite/pulley") {
+        // It isn't even worth running Pulley on anything else, as it will just
+        // panic right now, and make the tests slow and produce tons of output
+        // on stderr.
+        return Ok(());
     }
 
     let component_model = feature_found(wast, "component-model");
     cfg.wasm_component_model(component_model)
         .wasm_component_model_more_flags(component_model);
 
-    if feature_found(wast, "canonicalize-nan") && is_cranelift {
+    if feature_found(wast, "canonicalize-nan") && strategy.uses_cranelift() {
         cfg.cranelift_nan_canonicalization(true);
     }
     let test_allocates_lots_of_memory = wast.ends_with("more-than-4gb.wast");

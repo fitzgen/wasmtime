@@ -50,15 +50,11 @@ pub type VMArrayCallFunction =
 pub struct VMWasmCallFunction(VMFunctionBody);
 
 /// An imported function.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 #[repr(C)]
 pub struct VMFunctionImport {
-    /// Function pointer to use when calling this imported function from Wasm.
-    pub wasm_call: NonNull<VMWasmCallFunction>,
-
-    /// Function pointer to use when calling this imported function with the
-    /// "array" calling convention that `Func::new` et al use.
-    pub array_call: VMArrayCallFunction,
+    /// TODO FITZGEN
+    pub payload: VMFuncRefPayload,
 
     /// The VM state associated with this function.
     ///
@@ -621,13 +617,10 @@ mod test_vmshared_type_index {
     }
 }
 
-/// The VM caller-checked "funcref" record, for caller-side signature checking.
-///
-/// It consists of function pointer(s), a type id to be checked by the
-/// caller, and the vmctx closure associated with this function.
-#[derive(Debug, Clone)]
+/// TODO FITZGEN
 #[repr(C)]
-pub struct VMFuncRef {
+#[derive(Debug, Clone)]
+pub struct VMFuncRefTrampolines {
     /// Function pointer for this funcref if being called via the "array"
     /// calling convention that `Func::new` et al use.
     pub array_call: VMArrayCallFunction,
@@ -651,6 +644,194 @@ pub struct VMFuncRef {
     /// mean that this field needs to be an `Option` even though it is non-null
     /// the vast vast vast majority of the time.
     pub wasm_call: Option<NonNull<VMWasmCallFunction>>,
+}
+
+/// TODO FITZGEN
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct VMFuncRefInterpreterState {
+    /// TODO FITZGEN
+    ///
+    /// Always `0`. Must overlap with `VMFuncRefTrampolines::array_call` (which
+    /// is always non-null) so that we can use this as a discriminant for the
+    /// `VMFuncRefPayload` union.
+    tag: usize,
+
+    /// Function pointer for this funcref if being called via the "array"
+    /// calling convention that `Func::new` et al use.
+    pub host_call: NonNull<VMWasmCallFunction>,
+
+    /// TODO FITZGEN
+    pub interpreter_call: NonNull<VMWasmCallFunction>,
+}
+
+impl VMFuncRefInterpreterState {
+    /// TODO FITZGEN
+    pub fn new(
+        host_call: NonNull<VMWasmCallFunction>,
+        interpreter_call: NonNull<VMWasmCallFunction>,
+    ) -> Self {
+        Self {
+            tag: 0,
+            host_call,
+            interpreter_call,
+        }
+    }
+}
+
+/// TODO FITZGEN
+#[repr(C)]
+pub union VMFuncRefPayload {
+    /// TODO FITZGEN
+    trampolines: mem::ManuallyDrop<VMFuncRefTrampolines>,
+    /// TODO FITZGEN
+    interpreter: mem::ManuallyDrop<VMFuncRefInterpreterState>,
+}
+
+impl Clone for VMFuncRefPayload {
+    fn clone(&self) -> Self {
+        match self.unpack() {
+            UnpackedFuncRefPayload::Trampolines(t) => Self {
+                trampolines: mem::ManuallyDrop::new(t.clone()),
+            },
+            #[cfg(feature = "pulley")]
+            UnpackedFuncRefPayload::Interpreter(i) => Self {
+                interpreter: mem::ManuallyDrop::new(i.clone()),
+            },
+        }
+    }
+}
+
+impl From<VMFuncRefTrampolines> for VMFuncRefPayload {
+    fn from(trampolines: VMFuncRefTrampolines) -> Self {
+        let trampolines = mem::ManuallyDrop::new(trampolines);
+        Self { trampolines }
+    }
+}
+
+impl From<VMFuncRefInterpreterState> for VMFuncRefPayload {
+    fn from(interpreter: VMFuncRefInterpreterState) -> Self {
+        let interpreter = mem::ManuallyDrop::new(interpreter);
+        Self { interpreter }
+    }
+}
+
+impl VMFuncRefPayload {
+    /// TODO FITZGEN
+    pub fn is_interpreter_state(&self) -> bool {
+        unsafe { self.interpreter.tag == 0 }
+    }
+
+    /// TODO FITZGEN
+    pub fn is_trampolines(&self) -> bool {
+        !self.is_interpreter_state()
+    }
+
+    /// Is this a trampolines payload that is missing its wasm-call trampoline?
+    pub fn is_missing_wasm_call(&self) -> bool {
+        matches!(
+            self.unpack(),
+            UnpackedFuncRefPayload::Trampolines(VMFuncRefTrampolines {
+                wasm_call: None,
+                ..
+            })
+        )
+    }
+
+    /// TODO FITZGEN
+    pub fn unpack(&self) -> UnpackedFuncRefPayload<'_> {
+        unsafe {
+            if self.is_interpreter_state() {
+                #[cfg(feature = "pulley")]
+                return UnpackedFuncRefPayload::Interpreter(&self.interpreter);
+                #[cfg(not(feature = "pulley"))]
+                unreachable!()
+            } else {
+                UnpackedFuncRefPayload::Trampolines(&self.trampolines)
+            }
+        }
+    }
+
+    /// TODO FITZGEN
+    pub fn unpack_mut(&mut self) -> UnpackedFuncRefPayloadMut<'_> {
+        unsafe {
+            if self.is_interpreter_state() {
+                #[cfg(feature = "pulley")]
+                return UnpackedFuncRefPayloadMut::Interpreter(&mut self.interpreter);
+                #[cfg(not(feature = "pulley"))]
+                unreachable!()
+            } else {
+                UnpackedFuncRefPayloadMut::Trampolines(&mut self.trampolines)
+            }
+        }
+    }
+
+    /// TODO FITZGEN
+    #[track_caller]
+    pub fn unwrap_trampolines(&self) -> &VMFuncRefTrampolines {
+        match self.unpack() {
+            UnpackedFuncRefPayload::Trampolines(t) => t,
+            #[cfg(feature = "pulley")]
+            UnpackedFuncRefPayload::Interpreter(_) => {
+                panic!("`unwrap_trampolines` on a non-trampolines `VMFuncRef`")
+            }
+        }
+    }
+
+    /// TODO FITZGEN
+    #[track_caller]
+    pub fn unwrap_trampolines_mut(&mut self) -> &mut VMFuncRefTrampolines {
+        match self.unpack_mut() {
+            UnpackedFuncRefPayloadMut::Trampolines(t) => t,
+            _ => panic!("`unwrap_trampolines_mut` on a non-trampolines `VMFuncRef`"),
+        }
+    }
+}
+
+/// TODO FITZGEN
+#[derive(Debug, Clone, Copy)]
+pub enum UnpackedFuncRefPayload<'a> {
+    /// TODO FITZGEN
+    Trampolines(&'a VMFuncRefTrampolines),
+    /// TODO FITZGEN
+    #[cfg(feature = "pulley")]
+    Interpreter(&'a VMFuncRefInterpreterState),
+}
+
+/// TODO FITZGEN
+#[derive(Debug)]
+pub enum UnpackedFuncRefPayloadMut<'a> {
+    /// TODO FITZGEN
+    Trampolines(&'a mut VMFuncRefTrampolines),
+    /// TODO FITZGEN
+    Interpreter(&'a mut VMFuncRefInterpreterState),
+}
+
+impl std::fmt::Debug for VMFuncRefPayload {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.unpack() {
+            UnpackedFuncRefPayload::Trampolines(t) => f
+                .debug_tuple("VMFuncRefPayload::Trampolines")
+                .field(t)
+                .finish(),
+            #[cfg(feature = "pulley")]
+            UnpackedFuncRefPayload::Interpreter(i) => f
+                .debug_tuple("VMFuncRefPayload::Interpreter")
+                .field(i)
+                .finish(),
+        }
+    }
+}
+
+/// The VM caller-checked "funcref" record, for caller-side signature checking.
+///
+/// It consists of function pointer(s), a type id to be checked by the
+/// caller, and the vmctx closure associated with this function.
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct VMFuncRef {
+    /// TODO FITZGEN
+    pub payload: VMFuncRefPayload,
 
     /// Function signature's type id.
     pub type_index: VMSharedTypeIndex,
@@ -668,9 +849,39 @@ pub struct VMFuncRef {
 unsafe impl Send for VMFuncRef {}
 unsafe impl Sync for VMFuncRef {}
 
+impl VMFuncRef {
+    /// TODO FITZGEN
+    pub fn with_trampolines(
+        vmctx: *mut VMOpaqueContext,
+        type_index: VMSharedTypeIndex,
+        trampolines: VMFuncRefTrampolines,
+    ) -> Self {
+        let trampolines = mem::ManuallyDrop::new(trampolines);
+        VMFuncRef {
+            payload: VMFuncRefPayload { trampolines },
+            type_index,
+            vmctx,
+        }
+    }
+
+    /// TODO FITZGEN
+    pub fn with_interpreter_state(
+        vmctx: *mut VMOpaqueContext,
+        type_index: VMSharedTypeIndex,
+        interpreter: VMFuncRefInterpreterState,
+    ) -> Self {
+        let interpreter = mem::ManuallyDrop::new(interpreter);
+        VMFuncRef {
+            payload: VMFuncRefPayload { interpreter },
+            type_index,
+            vmctx,
+        }
+    }
+}
+
 #[cfg(test)]
 mod test_vm_func_ref {
-    use super::VMFuncRef;
+    use super::*;
     use core::mem::offset_of;
     use std::mem::size_of;
     use wasmtime_environ::{HostPtr, Module, PtrSize, VMOffsets};
@@ -684,11 +895,11 @@ mod test_vm_func_ref {
             usize::from(offsets.ptr.size_of_vm_func_ref())
         );
         assert_eq!(
-            offset_of!(VMFuncRef, array_call),
+            offset_of!(VMFuncRef, payload) + offset_of!(VMFuncRefTrampolines, array_call),
             usize::from(offsets.ptr.vm_func_ref_array_call())
         );
         assert_eq!(
-            offset_of!(VMFuncRef, wasm_call),
+            offset_of!(VMFuncRef, payload) + offset_of!(VMFuncRefTrampolines, wasm_call),
             usize::from(offsets.ptr.vm_func_ref_wasm_call())
         );
         assert_eq!(

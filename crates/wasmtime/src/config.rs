@@ -1762,7 +1762,12 @@ impl Config {
     fn compiler_panicking_wasm_features(&self) -> WasmFeatures {
         #[cfg(any(feature = "cranelift", feature = "winch"))]
         match self.compiler_config.strategy {
-            None | Some(Strategy::Cranelift) => WasmFeatures::empty(),
+            None | Some(Strategy::Cranelift) => match self.compiler_target().architecture {
+                target_lexicon::Architecture::Pulley32 | target_lexicon::Architecture::Pulley64 => {
+                    WasmFeatures::all()
+                }
+                _ => WasmFeatures::empty(),
+            },
             Some(Strategy::Winch) => {
                 let mut unsupported = WasmFeatures::GC
                     | WasmFeatures::FUNCTION_REFERENCES
@@ -1950,7 +1955,13 @@ impl Config {
         // If we're going to compile with winch, we must use the winch calling convention.
         #[cfg(any(feature = "cranelift", feature = "winch"))]
         {
-            tunables.winch_callable = self.compiler_config.strategy == Some(Strategy::Winch);
+            tunables.winch_callable = match self.compiler_config.strategy {
+                Some(Strategy::Auto) | None => {
+                    !cfg!(feature = "cranelift") && cfg!(feature = "winch")
+                }
+                Some(Strategy::Cranelift) => false,
+                Some(Strategy::Winch) => true,
+            };
 
             if tunables.winch_callable && !tunables.table_lazy_init {
                 bail!("Winch requires the table-lazy-init configuration option");
@@ -2029,6 +2040,7 @@ impl Config {
             Some(Strategy::Cranelift) => wasmtime_cranelift::builder(target)?,
             #[cfg(not(feature = "cranelift"))]
             Some(Strategy::Cranelift) => bail!("cranelift support not compiled in"),
+
             #[cfg(feature = "winch")]
             Some(Strategy::Winch) => wasmtime_winch::builder(target)?,
             #[cfg(not(feature = "winch"))]
@@ -2946,7 +2958,11 @@ impl PoolingAllocationConfig {
 pub(crate) fn probestack_supported(arch: Architecture) -> bool {
     matches!(
         arch,
-        Architecture::X86_64 | Architecture::Aarch64(_) | Architecture::Riscv64(_)
+        Architecture::X86_64
+            | Architecture::Aarch64(_)
+            | Architecture::Riscv64(_)
+            | Architecture::Pulley32
+            | Architecture::Pulley64
     )
 }
 

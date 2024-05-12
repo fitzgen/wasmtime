@@ -4,7 +4,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use clap::Parser;
 use std::net::TcpListener;
 use std::{path::Path, time::Duration};
-use wasmtime::{Engine, Module, Precompiled, StoreLimits, StoreLimitsBuilder};
+use wasmtime::{Config, Engine, Module, Precompiled, StoreLimits, StoreLimitsBuilder};
 use wasmtime_cli_flags::{opt::WasmtimeOptionValue, CommonOptions};
 use wasmtime_wasi::WasiCtxBuilder;
 
@@ -91,6 +91,10 @@ pub struct RunCommon {
     /// cause the environment variable `FOO` to be inherited.
     #[arg(long = "env", number_of_values = 1, value_name = "NAME[=VAL]", value_parser = parse_env_var)]
     pub vars: Vec<(String, Option<String>)>,
+
+    /// TODO FITZGEN
+    #[arg(long = "pulley")]
+    pub pulley: bool,
 }
 
 fn parse_env_var(s: &str) -> Result<(String, Option<String>)> {
@@ -112,6 +116,21 @@ fn parse_dirs(s: &str) -> Result<(String, String)> {
 }
 
 impl RunCommon {
+    pub fn config(&mut self, pooling_allocator_default: Option<bool>) -> Result<Config> {
+        let target = if self.pulley {
+            if cfg!(target_pointer_width = "32") {
+                Some("pulley32")
+            } else if cfg!(target_pointer_width = "64") {
+                Some("pulley64")
+            } else {
+                bail!("pulley only supports 32- and 64-bit targets")
+            }
+        } else {
+            None
+        };
+        self.common.config(target, pooling_allocator_default)
+    }
+
     pub fn store_limits(&self) -> StoreLimits {
         let mut limits = StoreLimitsBuilder::new();
         if let Some(max) = self.common.wasm.max_memory_size {

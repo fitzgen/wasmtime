@@ -8,9 +8,9 @@ use crate::runtime::vm::export::Export;
 use crate::runtime::vm::memory::{Memory, RuntimeMemoryCreator};
 use crate::runtime::vm::table::{Table, TableElement, TableElementType};
 use crate::runtime::vm::vmcontext::{
-    VMBuiltinFunctionsArray, VMContext, VMFuncRef, VMFunctionImport, VMGlobalDefinition,
-    VMGlobalImport, VMMemoryDefinition, VMMemoryImport, VMOpaqueContext, VMRuntimeLimits,
-    VMTableDefinition, VMTableImport,
+    VMBuiltinFunctionsArray, VMContext, VMFuncRef, VMFuncRefTrampolines, VMFunctionImport,
+    VMGlobalDefinition, VMGlobalImport, VMMemoryDefinition, VMMemoryImport, VMOpaqueContext,
+    VMRuntimeLimits, VMTableDefinition, VMTableImport,
 };
 use crate::runtime::vm::{
     ExportFunction, ExportGlobal, ExportMemory, ExportTable, GcStore, Imports, ModuleRuntimeInfo,
@@ -37,6 +37,8 @@ use wasmtime_wmemcheck::Wmemcheck;
 mod allocator;
 
 pub use allocator::*;
+
+use super::vmcontext::VMFuncRefInterpreterState;
 
 /// A type that roughly corresponds to a WebAssembly instance, but is also used
 /// for host-defined objects.
@@ -721,23 +723,47 @@ impl Instance {
             *base.add(sig.index())
         };
 
+        let vmctx = VMOpaqueContext::from_vmcontext(self.vmctx());
+
         let func_ref = if let Some(def_index) = self.module().defined_func_index(index) {
             VMFuncRef {
-                array_call: self
-                    .runtime_info
-                    .array_to_wasm_trampoline(def_index)
-                    .expect("should have array-to-Wasm trampoline for escaping function"),
-                wasm_call: Some(self.runtime_info.function(def_index)),
-                vmctx: VMOpaqueContext::from_vmcontext(self.vmctx()),
+                vmctx,
                 type_index,
+                payload: if unsafe {
+                    *self.vmctx_plus_offset(self.offsets().ptr.vmctx_is_interpreter())
+                } {
+                    VMFuncRefInterpreterState::new(
+                        unsafe {
+                            // TODO FITZGEN: replace this transmute with
+                            // whatever the frickin casts necessary are
+                            mem::transmute(
+                                self.runtime_info
+                                    .array_to_wasm_trampoline(def_index)
+                                    .expect(
+                                    "should have native-to-Wasm trampoline for escaping function",
+                                ),
+                            )
+                        },
+                        self.runtime_info.function(def_index),
+                    )
+                    .into()
+                } else {
+                    VMFuncRefTrampolines {
+                        array_call: self
+                            .runtime_info
+                            .array_to_wasm_trampoline(def_index)
+                            .expect("should have array-to-Wasm trampoline for escaping function"),
+                        wasm_call: Some(self.runtime_info.function(def_index)),
+                    }
+                    .into()
+                },
             }
         } else {
             let import = self.imported_function(index);
             VMFuncRef {
-                array_call: import.array_call,
-                wasm_call: Some(import.wasm_call),
-                vmctx: import.vmctx,
+                vmctx,
                 type_index,
+                payload: import.payload.clone(),
             }
         };
 
@@ -1189,6 +1215,9 @@ impl Instance {
         // Initialize shared types
         let types = self.runtime_info.type_ids();
         *self.vmctx_plus_offset_mut(offsets.ptr.vmctx_type_ids_array()) = types.as_ptr();
+
+        *self.vmctx_plus_offset_mut(offsets.ptr.vmctx_is_interpreter()) =
+            self.runtime_info.is_interpreter();
 
         // Initialize the built-in functions
         *self.vmctx_plus_offset_mut(offsets.ptr.vmctx_builtin_functions()) =

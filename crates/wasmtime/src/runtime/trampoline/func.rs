@@ -5,6 +5,7 @@ use crate::runtime::vm::{
     StoreBox, VMArrayCallHostFuncContext, VMContext, VMFuncRef, VMOpaqueContext,
 };
 use crate::type_registry::RegisteredType;
+use crate::vm::VMFuncRefTrampolines;
 use crate::{FuncType, ValRaw};
 use core::ptr;
 
@@ -82,8 +83,11 @@ where
     unsafe {
         Ok(VMArrayCallHostFuncContext::new(
             VMFuncRef {
-                array_call,
-                wasm_call: None,
+                payload: VMFuncRefTrampolines {
+                    array_call,
+                    wasm_call: None,
+                }
+                .into(),
                 type_index: sig.index(),
                 vmctx: ptr::null_mut(),
             },

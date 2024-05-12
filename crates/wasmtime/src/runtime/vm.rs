@@ -68,9 +68,10 @@ pub use crate::runtime::vm::sys::unwind::UnwindRegistration;
 pub use crate::runtime::vm::table::{Table, TableElement};
 pub use crate::runtime::vm::traphandlers::*;
 pub use crate::runtime::vm::vmcontext::{
-    VMArrayCallFunction, VMArrayCallHostFuncContext, VMContext, VMFuncRef, VMFunctionBody,
-    VMFunctionImport, VMGlobalDefinition, VMGlobalImport, VMMemoryDefinition, VMMemoryImport,
-    VMOpaqueContext, VMRuntimeLimits, VMTableImport, VMWasmCallFunction, ValRaw,
+    UnpackedFuncRefPayload, VMArrayCallFunction, VMArrayCallHostFuncContext, VMContext, VMFuncRef,
+    VMFuncRefTrampolines, VMFunctionBody, VMFunctionImport, VMGlobalDefinition, VMGlobalImport,
+    VMMemoryDefinition, VMMemoryImport, VMOpaqueContext, VMRuntimeLimits, VMTableImport,
+    VMWasmCallFunction, ValRaw,
 };
 pub use send_sync_ptr::SendSyncPtr;
 
@@ -221,6 +222,14 @@ impl ModuleRuntimeInfo {
         match self {
             ModuleRuntimeInfo::Module(m) => m.env_module(),
             ModuleRuntimeInfo::Bare(b) => &b.module,
+        }
+    }
+
+    /// TODO FITZGEN
+    pub(crate) fn is_interpreter(&self) -> bool {
+        match self {
+            ModuleRuntimeInfo::Module(m) => m.compiled_module().is_pulley(),
+            ModuleRuntimeInfo::Bare(_) => false,
         }
     }
 

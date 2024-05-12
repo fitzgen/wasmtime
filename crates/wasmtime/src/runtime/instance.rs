@@ -6,6 +6,7 @@ use crate::runtime::vm::{
 };
 use crate::store::{InstanceId, StoreOpaque, Stored};
 use crate::types::matching;
+use crate::vm::{UnpackedFuncRefPayload, VMFuncRefTrampolines};
 use crate::{
     AsContextMut, Engine, Export, Extern, Func, Global, Memory, Module, ModuleExport, SharedMemory,
     StoreContext, StoreContextMut, Table, TypedFunc,
@@ -361,13 +362,19 @@ impl Instance {
         let caller_vmctx = instance.vmctx();
         unsafe {
             super::func::invoke_wasm_and_catch_traps(store, |_default_caller| {
-                let func = f.func_ref.as_ref().array_call;
-                func(
-                    f.func_ref.as_ref().vmctx,
-                    VMOpaqueContext::from_vmcontext(caller_vmctx),
-                    [].as_mut_ptr(),
-                    0,
-                )
+                match f.func_ref.as_ref().payload.unpack() {
+                    #[cfg(feature = "pulley")]
+                    UnpackedFuncRefPayload::Interpreter(_) => todo!("FITZGEN"),
+                    UnpackedFuncRefPayload::Trampolines(trampolines) => {
+                        let func = trampolines.array_call;
+                        func(
+                            f.func_ref.as_ref().vmctx,
+                            VMOpaqueContext::from_vmcontext(caller_vmctx),
+                            [].as_mut_ptr(),
+                            0,
+                        )
+                    }
+                }
             })?;
         }
         Ok(())
@@ -707,8 +714,7 @@ impl OwnedImports {
             crate::runtime::vm::Export::Function(f) => {
                 let f = f.func_ref.as_ref();
                 self.functions.push(VMFunctionImport {
-                    wasm_call: f.wasm_call.unwrap(),
-                    array_call: f.array_call,
+                    payload: f.payload.clone(),
                     vmctx: f.vmctx,
                 });
             }
@@ -814,13 +820,23 @@ impl<T> InstancePre<T> {
                 Definition::Extern(_, _) => {}
                 Definition::HostFunc(f) => {
                     host_funcs += 1;
-                    if f.func_ref().wasm_call.is_none() {
+                    let func_ref = f.func_ref();
+                    if let UnpackedFuncRefPayload::Trampolines(
+                        trampolines @ VMFuncRefTrampolines {
+                            wasm_call: None, ..
+                        },
+                    ) = func_ref.payload.unpack()
+                    {
                         // `f` needs its `VMFuncRef::wasm_call` patched with a
                         // Wasm-to-native trampoline.
                         debug_assert!(matches!(f.host_ctx(), crate::HostContext::Array(_)));
                         func_refs.push(VMFuncRef {
-                            wasm_call: module.wasm_to_array_trampoline(f.sig_index()),
-                            ..*f.func_ref()
+                            payload: VMFuncRefTrampolines {
+                                wasm_call: module.wasm_to_array_trampoline(f.sig_index()),
+                                ..*trampolines
+                            }
+                            .into(),
+                            ..*func_ref
                         });
                     }
                 }
@@ -950,10 +966,12 @@ fn pre_instantiate_raw(
             Definition::HostFunc(func) => unsafe {
                 func.to_func_store_rooted(
                     store,
-                    if func.func_ref().wasm_call.is_none() {
-                        Some(func_refs.next().unwrap())
-                    } else {
-                        None
+                    match func.func_ref().payload.unpack() {
+                        UnpackedFuncRefPayload::Trampolines(VMFuncRefTrampolines {
+                            wasm_call: None,
+                            ..
+                        }) => Some(func_refs.next().unwrap()),
+                        _ => None,
                     },
                 )
                 .into()

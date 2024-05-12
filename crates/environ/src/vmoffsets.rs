@@ -15,6 +15,8 @@
 //      gc_heap_data: *mut T, // Collector-specific pointer
 //      store: *mut dyn Store,
 //      type_ids: *const VMSharedTypeIndex,
+//      is_interpreter: bool,
+//      _padding: [u8; 6], // (On 64-bit systems, or 2 on 32-bit)
 //      imported_functions: [VMFunctionImport; module.num_imported_functions],
 //      imported_tables: [VMTableImport; module.num_imported_tables],
 //      imported_memories: [VMMemoryImport; module.num_imported_memories],
@@ -282,12 +284,18 @@ pub trait PtrSize {
         self.vmctx_store() + 2 * self.size()
     }
 
+    /// The offset of the `is_interpreter` field.
+    #[inline]
+    fn vmctx_is_interpreter(&self) -> u8 {
+        self.vmctx_type_ids_array() + 1
+    }
+
     /// The end of statically known offsets in `VMContext`.
     ///
     /// Data after this is dynamically sized.
     #[inline]
     fn vmctx_dynamic_data_start(&self) -> u8 {
-        self.vmctx_type_ids_array() + self.size()
+        self.vmctx_is_interpreter() + self.size()
     }
 }
 
@@ -484,6 +492,7 @@ impl<P: PtrSize> From<VMOffsetsFields<P>> for VMOffsets<P> {
         }
 
         fields! {
+            align(ret.ptr.size().into()),
             size(imported_functions)
                 = cmul(ret.num_imported_functions, ret.size_of_vmfunction_import()),
             size(imported_tables)

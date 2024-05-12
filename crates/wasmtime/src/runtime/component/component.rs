@@ -6,6 +6,7 @@ use crate::runtime::vm::component::ComponentRuntimeInfo;
 use crate::runtime::vm::{
     CompiledModuleId, VMArrayCallFunction, VMFuncRef, VMFunctionBody, VMWasmCallFunction,
 };
+use crate::vm::VMFuncRefTrampolines;
 use crate::{
     code::CodeObject, code_memory::CodeMemory, type_registry::TypeCollection, Engine, Module,
     ResourcesRequired,
@@ -506,7 +507,7 @@ impl Component {
     /// if necessary in which case it's filled in here.
     pub(crate) fn resource_drop_func_ref(&self, dtor: &crate::func::HostFunc) -> VMFuncRef {
         // Host functions never have their `wasm_call` filled in at this time.
-        assert!(dtor.func_ref().wasm_call.is_none());
+        assert!(dtor.func_ref().payload.is_missing_wasm_call());
 
         // Note that if `resource_drop_wasm_to_native_trampoline` is not present
         // then this can't be called by the component, so it's ok to leave it
@@ -518,7 +519,11 @@ impl Component {
             .as_ref()
             .map(|i| self.func(i).cast());
         VMFuncRef {
-            wasm_call,
+            payload: VMFuncRefTrampolines {
+                wasm_call,
+                ..*dtor.func_ref().payload.unwrap_trampolines()
+            }
+            .into(),
             ..*dtor.func_ref()
         }
     }

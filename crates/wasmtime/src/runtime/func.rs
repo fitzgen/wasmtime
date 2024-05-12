@@ -6,6 +6,7 @@ use crate::runtime::vm::{
 use crate::runtime::Uninhabited;
 use crate::store::{AutoAssertNoGc, StoreData, StoreOpaque, Stored};
 use crate::type_registry::RegisteredType;
+use crate::vm::{UnpackedFuncRefPayload, VMFuncRefTrampolines};
 use crate::{
     AsContext, AsContextMut, CallHook, Engine, Extern, FuncType, Instance, Module, Ref,
     StoreContext, StoreContextMut, Val, ValRaw, ValType,
@@ -1069,15 +1070,71 @@ impl Func {
         params_and_returns: *mut ValRaw,
         params_and_returns_capacity: usize,
     ) -> Result<()> {
-        invoke_wasm_and_catch_traps(store, |caller| {
-            let func_ref = func_ref.as_ref();
-            (func_ref.array_call)(
-                func_ref.vmctx,
-                caller.cast::<VMOpaqueContext>(),
-                params_and_returns,
-                params_and_returns_capacity,
-            )
-        })
+        let func_ref = func_ref.as_ref();
+        match func_ref.payload.unpack() {
+            UnpackedFuncRefPayload::Trampolines(trampolines) => {
+                invoke_wasm_and_catch_traps(store, |caller| {
+                    (trampolines.array_call)(
+                        func_ref.vmctx,
+                        caller.cast::<VMOpaqueContext>(),
+                        params_and_returns,
+                        params_and_returns_capacity,
+                    )
+                })
+            }
+            #[cfg(feature = "pulley")]
+            UnpackedFuncRefPayload::Interpreter(int) => {
+                // TODO FITZGEN: need to call `invoke_wasm_and_catch_traps`
+                // somehow (can't right now because of borrow conflicts) so that
+                // we `setjmp` for host traps. I think we can just pass the
+                // store through `invoke_wasm_and_catch_traps` -> `catch_traps`
+                // -> the closure?
+                //
+                // TODO FITZGEN: we actually still need trampolines with pulley
+                // to convert from the array call calling convention to its
+                // calling convention, or we need to make it use the array call
+                // calling convention all the time...
+                log::trace!(
+                    "FITZGEN: about to call, params_and_returns = {:#?}",
+                    core::slice::from_raw_parts(
+                        params_and_returns.cast_const(),
+                        params_and_returns_capacity
+                    )
+                );
+                use pulley_interpreter::interp::{Val, XRegVal};
+                let _ = store
+                    .0
+                    .pulley_vm()
+                    .call(
+                        int.host_call.cast(),
+                        &[
+                            Val::XReg(XRegVal::new_ptr(func_ref.vmctx)),
+                            Val::XReg(
+                                // TODO FITZGEN: need to
+                                // `invoke_wasm_and_catch_traps` to get the
+                                // caller context.
+                                //
+                                // XRegVal::new_usize(caller.cast::<VMOpaqueContext>() as usize),
+                                XRegVal::new_ptr(ptr::null_mut::<VMOpaqueContext>()),
+                            ),
+                            Val::XReg(XRegVal::new_ptr(params_and_returns)),
+                            Val::XReg(XRegVal::new_u64(
+                                u64::try_from(params_and_returns_capacity).unwrap(),
+                            )),
+                        ],
+                        [],
+                    )
+                    .unwrap();
+                log::trace!(
+                    "FITZGEN: done with call, params_and_returns = {:#?}",
+                    core::slice::from_raw_parts(
+                        params_and_returns.cast_const(),
+                        params_and_returns_capacity
+                    )
+                );
+                Ok(())
+            }
+        }
     }
 
     /// Converts the raw representation of a `funcref` into an `Option<Func>`
@@ -1180,6 +1237,11 @@ impl Func {
         results: &mut [Val],
     ) -> Result<bool> {
         let (ty, opaque) = self.ty_ref(store.0);
+        log::trace!(
+            "FITZGEN: calling function of registered type = {:?}",
+            ty.registered_type()
+        );
+        log::trace!("FITZGEN: calling function of func type =  {ty:?}");
         if ty.params().len() != params.len() {
             bail!(
                 "expected {} arguments, got {}",
@@ -1265,7 +1327,14 @@ impl Func {
     pub(crate) fn vm_func_ref(&self, store: &mut StoreOpaque) -> NonNull<VMFuncRef> {
         let func_data = &mut store.store_data_mut()[self.0];
         let func_ref = func_data.export().func_ref;
-        if unsafe { func_ref.as_ref().wasm_call.is_some() } {
+        if unsafe {
+            let func_ref = func_ref.as_ref();
+            match func_ref.payload.unpack() {
+                UnpackedFuncRefPayload::Trampolines(tramps) => tramps.wasm_call.is_some(),
+                #[cfg(feature = "pulley")]
+                UnpackedFuncRefPayload::Interpreter(_) => true,
+            }
+        } {
             return func_ref;
         }
 
@@ -1313,28 +1382,35 @@ impl Func {
                 // copy in the store, use the patched version. Otherwise, use
                 // the potentially un-patched version.
                 if let Some(func_ref) = func_data.in_store_func_ref {
-                    func_ref.as_non_null()
+                    func_ref.as_non_null().as_ref()
                 } else {
-                    func_data.export().func_ref
+                    func_data.export().func_ref.as_ref()
                 }
             };
             VMFunctionImport {
-                wasm_call: if let Some(wasm_call) = f.as_ref().wasm_call {
-                    wasm_call
-                } else {
-                    // Assert that this is a array-call function, since those
-                    // are the only ones that could be missing a `wasm_call`
-                    // trampoline.
-                    let _ = VMArrayCallHostFuncContext::from_opaque(f.as_ref().vmctx);
+                vmctx: f.vmctx,
+                payload: match f.payload.unpack() {
+                    #[cfg(feature = "pulley")]
+                    UnpackedFuncRefPayload::Interpreter(i) => i.clone().into(),
+                    UnpackedFuncRefPayload::Trampolines(trampolines) => VMFuncRefTrampolines {
+                        wasm_call: if let Some(wasm_call) = trampolines.wasm_call {
+                            Some(wasm_call)
+                        } else {
+                            // Assert that this is a array-call function, since those
+                            // are the only ones that could be missing a `wasm_call`
+                            // trampoline.
+                            let _ = VMArrayCallHostFuncContext::from_opaque(f.vmctx);
 
-                    let sig = self.type_index(store.store_data());
-                    module.wasm_to_array_trampoline(sig).expect(
-                        "if the wasm is importing a function of a given type, it must have the \
-                         type's trampoline",
-                    )
+                            let sig = self.type_index(store.store_data());
+                            let wasm_call = module.wasm_to_array_trampoline(sig).expect(
+                                "if the wasm is importing a function of a given type, it must have the \
+                                 type's trampoline",
+                            );
+                            Some(wasm_call)
+                        },
+                        array_call: trampolines.array_call,
+                    }.into(),
                 },
-                array_call: f.as_ref().array_call,
-                vmctx: f.as_ref().vmctx,
             }
         }
     }
@@ -2207,8 +2283,11 @@ impl HostContext {
         let ctx = unsafe {
             VMArrayCallHostFuncContext::new(
                 VMFuncRef {
-                    array_call,
-                    wasm_call: None,
+                    payload: VMFuncRefTrampolines {
+                        array_call,
+                        wasm_call: None,
+                    }
+                    .into(),
                     type_index,
                     vmctx: ptr::null_mut(),
                 },
@@ -2434,7 +2513,12 @@ impl HostFunc {
         self.validate_store(store);
 
         if rooted_func_ref.is_some() {
-            debug_assert!(self.func_ref().wasm_call.is_none());
+            debug_assert!(self
+                .func_ref()
+                .payload
+                .unwrap_trampolines()
+                .wasm_call
+                .is_none());
             debug_assert!(matches!(self.ctx, HostContext::Array(_)));
         }
 

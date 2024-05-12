@@ -306,6 +306,11 @@ impl CompiledModule {
     pub fn has_address_map(&self) -> bool {
         !self.code_memory.address_map_data().is_empty()
     }
+
+    /// TODO FITZGEN
+    pub fn is_pulley(&self) -> bool {
+        self.meta.is_pulley
+    }
 }
 
 #[cfg(feature = "addr2line")]

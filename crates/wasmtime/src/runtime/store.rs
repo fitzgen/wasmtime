@@ -320,6 +320,9 @@ pub struct StoreOpaque {
     func_refs: FuncRefs,
     host_globals: Vec<StoreBox<VMHostGlobalContext>>,
 
+    #[cfg(feature = "pulley")]
+    pulley_vm: pulley_interpreter::interp::Vm,
+
     // GC-related fields.
     gc_store: Option<GcStore>,
     gc_roots: RootSet,
@@ -521,6 +524,8 @@ impl<T> Store<T> {
                 #[cfg(feature = "component-model")]
                 num_component_instances: 0,
                 signal_handler: None,
+                #[cfg(feature = "pulley")]
+                pulley_vm: pulley_interpreter::interp::Vm::default(),
                 gc_store: None,
                 gc_roots: RootSet::default(),
                 gc_roots_list: GcRootsList::default(),
@@ -1508,6 +1513,12 @@ impl StoreOpaque {
     #[inline]
     pub fn runtime_limits(&self) -> &VMRuntimeLimits {
         &self.runtime_limits
+    }
+
+    /// TODO FITZGEN
+    #[cfg(feature = "pulley")]
+    pub fn pulley_vm(&mut self) -> &mut pulley_interpreter::interp::Vm {
+        &mut self.pulley_vm
     }
 
     #[inline(never)]

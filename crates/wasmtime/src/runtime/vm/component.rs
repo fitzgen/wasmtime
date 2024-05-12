@@ -11,6 +11,7 @@ use crate::runtime::vm::{
     SendSyncPtr, Store, VMArrayCallFunction, VMFuncRef, VMGlobalDefinition, VMMemoryDefinition,
     VMOpaqueContext, VMWasmCallFunction, ValRaw,
 };
+use crate::vm::{UnpackedFuncRefPayload, VMFuncRefTrampolines};
 use alloc::alloc::Layout;
 use alloc::sync::Arc;
 use core::any::Any;
@@ -324,10 +325,16 @@ impl ComponentInstance {
         unsafe {
             let offset = self.offsets.trampoline_func_ref(idx);
             let ret = self.vmctx_plus_offset::<VMFuncRef>(offset);
-            debug_assert!(
-                mem::transmute::<Option<NonNull<VMWasmCallFunction>>, usize>((*ret).wasm_call)
-                    != INVALID_PTR
-            );
+            match (*ret).payload.unpack() {
+                UnpackedFuncRefPayload::Trampolines(VMFuncRefTrampolines { wasm_call, .. }) => {
+                    debug_assert!(
+                        mem::transmute::<Option<NonNull<VMWasmCallFunction>>, usize>(*wasm_call)
+                            != INVALID_PTR
+                    )
+                }
+                #[cfg(feature = "pulley")]
+                UnpackedFuncRefPayload::Interpreter(_) => {}
+            }
             debug_assert!((*ret).vmctx as usize != INVALID_PTR);
             NonNull::new(ret.cast_mut()).unwrap()
         }
@@ -399,8 +406,11 @@ impl ComponentInstance {
             debug_assert!(*self.vmctx_plus_offset::<usize>(offset) == INVALID_PTR);
             let vmctx = VMOpaqueContext::from_vmcomponent(self.vmctx());
             *self.vmctx_plus_offset_mut(offset) = VMFuncRef {
-                wasm_call: Some(wasm_call),
-                array_call,
+                payload: VMFuncRefTrampolines {
+                    wasm_call: Some(wasm_call),
+                    array_call,
+                }
+                .into(),
                 type_index,
                 vmctx,
             };

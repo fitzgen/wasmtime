@@ -25,6 +25,8 @@ pub struct CodeMemory {
     relocations: Vec<(usize, obj::LibCall)>,
 
     // Ranges within `self.mmap` of where the particular sections lie.
+    //
+    // TODO FITZGEN: need to not make this executable when it is pulley code
     text: Range<usize>,
     unwind: Range<usize>,
     trap_data: Range<usize>,
@@ -129,7 +131,8 @@ impl CodeMemory {
                 _ => log::debug!("ignoring section {name}"),
             }
         }
-        Ok(Self {
+
+        let ret = Self {
             mmap: ManuallyDrop::new(mmap),
             unwind_registration: ManuallyDrop::new(None),
             published: false,
@@ -144,7 +147,14 @@ impl CodeMemory {
             info_data,
             wasm_data,
             relocations,
-        })
+        };
+
+        #[cfg(feature = "pulley")]
+        if let Ok(disas) = pulley_interpreter::disas::Disassembler::disassemble_all(ret.text()) {
+            log::debug!("FITZGEN: CodeMemory::new() disassembly:\n{disas}");
+        }
+
+        Ok(ret)
     }
 
     /// Returns a reference to the underlying `MmapVec` this memory owns.

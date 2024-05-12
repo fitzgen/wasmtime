@@ -242,7 +242,10 @@ impl Engine {
         {
             self.inner
                 .compatible_with_native_host
-                .get_or_init(|| self._check_compatible_with_native_host())
+                .get_or_init(|| {
+                    self._check_compatible_with_native_host()
+                        .map_err(|e| e.to_string())
+                })
                 .clone()
                 .map_err(anyhow::Error::msg)
         }
@@ -252,15 +255,21 @@ impl Engine {
         }
     }
 
-    fn _check_compatible_with_native_host(&self) -> Result<(), String> {
+    fn _check_compatible_with_native_host(&self) -> Result<()> {
         #[cfg(any(feature = "cranelift", feature = "winch"))]
         {
             let compiler = self.compiler();
 
             // Check to see that the config's target matches the host
             let target = compiler.triple();
-            if *target != target_lexicon::Triple::host() {
-                return Err(format!(
+
+            if *target != target_lexicon::Triple::host()
+                && !matches!(
+                    target.architecture,
+                    target_lexicon::Architecture::Pulley32 | target_lexicon::Architecture::Pulley64
+                )
+            {
+                return Err(anyhow!(
                     "target '{target}' specified in the configuration does not match the host"
                 ));
             }
@@ -298,7 +307,7 @@ impl Engine {
         &self,
         flag: &str,
         value: &FlagValue,
-    ) -> Result<(), String> {
+    ) -> Result<()> {
         let target = self.target();
         let ok = match flag {
             // These settings must all have be enabled, since their value
@@ -364,12 +373,12 @@ impl Engine {
             // Everything else is unknown and needs to be added somewhere to
             // this list if encountered.
             _ => {
-                return Err(format!("unknown shared setting {flag:?} configured to {value:?}"))
+                return Err(anyhow!("unknown shared setting {flag:?} configured to {value:?}"))
             }
         };
 
         if !ok {
-            return Err(format!(
+            return Err(anyhow!(
                 "setting {flag:?} is configured to {value:?} which is not supported",
             ));
         }
@@ -383,7 +392,7 @@ impl Engine {
         &self,
         flag: &str,
         value: &FlagValue,
-    ) -> Result<(), String> {
+    ) -> Result<()> {
         match value {
             // ISA flags are used for things like CPU features, so if they're
             // disabled then it's compatible with the native host.
@@ -393,10 +402,27 @@ impl Engine {
             // available.
             FlagValue::Bool(true) => {}
 
+            FlagValue::Enum("pointer32") if flag == "pointer_width" => {
+                ensure!(
+                    self.target().pointer_width().unwrap().bits() == 32,
+                    "isa-specific feature {flag:?} configured to {value:?} but the host \
+                     target is not 32-bit",
+                );
+                return Ok(());
+            }
+            FlagValue::Enum("pointer64") if flag == "pointer_width" => {
+                ensure!(
+                    self.target().pointer_width().unwrap().bits() == 64,
+                    "isa-specific feature {flag:?} configured to {value:?} but the host \
+                     target is not 64-bit",
+                );
+                return Ok(());
+            }
+
             // Only `bool` values are supported right now, other settings would
             // need more support here.
             _ => {
-                return Err(format!(
+                return Err(anyhow!(
                     "isa-specific feature {flag:?} configured to unknown value {value:?}"
                 ))
             }
@@ -449,7 +475,7 @@ impl Engine {
                 if cfg!(target_arch = "riscv64") && flag != "not_a_flag" {
                     return Ok(());
                 }
-                return Err(format!(
+                return Err(anyhow!(
                     "don't know how to test for target-specific flag {flag:?} at runtime"
                 ));
             }
@@ -458,7 +484,7 @@ impl Engine {
         let detect = match self.config().detect_host_feature {
             Some(detect) => detect,
             None => {
-                return Err(format!(
+                return Err(anyhow!(
                     "cannot determine if host feature {host_feature:?} is \
                      available at runtime, configure a probing function with \
                      `Config::detect_host_feature`"
@@ -468,11 +494,11 @@ impl Engine {
 
         match detect(host_feature) {
             Some(true) => Ok(()),
-            Some(false) => Err(format!(
+            Some(false) => Err(anyhow!(
                 "compilation setting {flag:?} is enabled, but not \
                  available on the host",
             )),
-            None => Err(format!(
+            None => Err(anyhow!(
                 "failed to detect if target-specific flag {flag:?} is \
                  available at runtime"
             )),

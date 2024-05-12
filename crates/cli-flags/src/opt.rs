@@ -372,7 +372,7 @@ impl WasmtimeOptionValue for wasmtime::OptLevel {
 }
 
 impl WasmtimeOptionValue for wasmtime::Strategy {
-    const VAL_HELP: &'static str = "=winch|cranelift";
+    const VAL_HELP: &'static str = "=cranelift|winch";
     fn parse(val: Option<&str>) -> Result<Self> {
         match String::parse(val)?.as_str() {
             "cranelift" => Ok(wasmtime::Strategy::Cranelift),

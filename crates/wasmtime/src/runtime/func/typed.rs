@@ -214,12 +214,20 @@ where
         let result = invoke_wasm_and_catch_traps(store, |caller| {
             let (func_ref, storage) = &mut captures;
             let func_ref = func_ref.as_ref();
-            (func_ref.array_call)(
-                func_ref.vmctx,
-                VMOpaqueContext::from_vmcontext(caller),
-                (storage as *mut Storage<_, _>) as *mut ValRaw,
-                mem::size_of_val::<Storage<_, _>>(storage) / mem::size_of::<ValRaw>(),
-            );
+            match func_ref.payload.unpack() {
+                crate::vm::UnpackedFuncRefPayload::Trampolines(trampolines) => {
+                    (trampolines.array_call)(
+                        func_ref.vmctx,
+                        VMOpaqueContext::from_vmcontext(caller),
+                        (storage as *mut Storage<_, _>) as *mut ValRaw,
+                        mem::size_of_val::<Storage<_, _>>(storage) / mem::size_of::<ValRaw>(),
+                    );
+                }
+                #[cfg(feature = "pulley")]
+                crate::vm::UnpackedFuncRefPayload::Interpreter(_interp) => {
+                    todo!("FITZGEN")
+                }
+            }
         });
 
         let (_, storage) = captures;
