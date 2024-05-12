@@ -1,0 +1,24 @@
+[package]
+authors = ["The Cranelift Project Developers"]
+description = "The pulley bytecode for fast interpreters"
+edition.workspace = true
+license = "Apache-2.0 WITH LLVM-exception"
+name = "cranelift-pulley"
+readme = "./README.md"
+repository = "https://github.com/bytecodealliance/wasmtime/tree/main/cranelift/pulley"
+version = "0.109.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+arbitrary = { workspace = true, optional = true }
+log = { workspace = true, optional = true }
+
+[features]
+std = []
+arbitrary = ["dep:arbitrary", "arbitrary/derive"]
+encode = []
+decode = []
+disas = ["decode"]
+interp = ["decode"]

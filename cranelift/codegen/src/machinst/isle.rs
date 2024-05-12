@@ -45,7 +45,7 @@ pub enum RangeView {
 #[doc(hidden)]
 macro_rules! isle_lower_prelude_methods {
     () => {
-        isle_common_prelude_methods!();
+        crate::isle_common_prelude_methods!();
 
         #[inline]
         fn value_type(&mut self, val: Value) -> Type {
@@ -592,6 +592,7 @@ macro_rules! isle_lower_prelude_methods {
                     self.put_in_regs(val)
                 })
                 .collect();
+            crate::trace!("FITZGEN: wtf calling lower_ctx.gen_return");
             self.lower_ctx.gen_return(rets);
         }
 

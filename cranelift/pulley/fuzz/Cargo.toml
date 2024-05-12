@@ -1,0 +1,21 @@
+[package]
+name = "cranelift-pulley-fuzz"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+cranelift-pulley = { path = "..", features = ["encode", "decode", "disas", "std", "arbitrary"] }
+env_logger = { workspace = true }
+libfuzzer-sys = { workspace = true }
+log = { workspace = true }
+
+[[bin]]
+name = "roundtrip"
+path = "fuzz_targets/roundtrip.rs"
+test = false
+doc = false
+bench = false

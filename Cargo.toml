@@ -113,6 +113,7 @@ members = [
   "cranelift",
   "cranelift/isle/fuzz",
   "cranelift/isle/islec",
+  "cranelift/pulley/fuzz",
   "cranelift/serde",
   "crates/bench-api",
   "crates/c-api/artifact",
@@ -203,6 +204,7 @@ cranelift-jit = { path = "cranelift/jit", version = "0.109.0" }
 cranelift-fuzzgen = { path = "cranelift/fuzzgen" }
 cranelift-bforest = { path = "cranelift/bforest", version = "0.109.0" }
 cranelift-control = { path = "cranelift/control", version = "0.109.0" }
+cranelift-pulley = { path = "cranelift/pulley", version = "0.109.0" }
 cranelift = { path = "cranelift/umbrella", version = "0.109.0" }
 
 winch-codegen = { path = "winch/codegen", version = "=0.20.0" }
@@ -215,7 +217,7 @@ byte-array-literals = { path = "crates/wasi-preview1-component-adapter/byte-arra
 regalloc2 = "0.9.3"
 
 # cap-std family:
-target-lexicon = "0.12.13"
+target-lexicon = "0.12.14"
 cap-std = "3.0.0"
 cap-rand = { version = "3.0.0", features = ["small_rng"] }
 cap-fs-ext = "3.0.0"
@@ -462,3 +464,6 @@ opt-level = 's'
 inherits = "release"
 codegen-units = 1
 lto = true
+
+[patch.crates-io]
+target-lexicon = { path = "../target-lexicon" }

@@ -604,6 +604,7 @@ dependencies = [
  "cranelift-control",
  "cranelift-entity",
  "cranelift-isle",
+ "cranelift-pulley",
  "criterion",
  "gimli",
  "hashbrown 0.14.3",
@@ -777,6 +778,24 @@ dependencies = [
  "log",
  "object 0.33.0",
  "target-lexicon",
+]
+
+[[package]]
+name = "cranelift-pulley"
+version = "0.109.0"
+dependencies = [
+ "arbitrary",
+ "log",
+]
+
+[[package]]
+name = "cranelift-pulley-fuzz"
+version = "0.0.0"
+dependencies = [
+ "cranelift-pulley",
+ "env_logger",
+ "libfuzzer-sys",
+ "log",
 ]
 
 [[package]]
@@ -2683,9 +2702,7 @@ dependencies = [
 
 [[package]]
 name = "target-lexicon"
-version = "0.12.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69758bda2e78f098e4ccb393021a0963bb3442eac05f135c30f61b7370bbafae"
+version = "0.12.14"
 
 [[package]]
 name = "tempfile"

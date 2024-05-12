@@ -23,6 +23,7 @@ cranelift-codegen-shared = { path = "./shared", version = "0.109.0" }
 cranelift-entity = { workspace = true }
 cranelift-bforest = { workspace = true }
 cranelift-control = { workspace = true }
+cranelift-pulley = { workspace = true, optional = true }
 hashbrown = { workspace = true, features = ["raw"] }
 target-lexicon = { workspace = true }
 log = { workspace = true }
@@ -78,6 +79,7 @@ x86 = []
 arm64 = []
 s390x = []
 riscv64 = []
+pbc64 = ["dep:cranelift-pulley", "cranelift-pulley/encode"]
 # Enable the ISA target for the host machine
 host-arch = []
 
@@ -86,7 +88,8 @@ all-arch = [
     "x86",
     "arm64",
     "s390x",
-    "riscv64"
+    "riscv64",
+    "pbc64",
 ]
 
 # For dependent crates that want to serialize some parts of cranelift

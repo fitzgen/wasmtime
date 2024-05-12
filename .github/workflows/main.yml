@@ -475,6 +475,7 @@ jobs:
       working-directory: ./fuzz
     - run: cargo fuzz build --dev -s none
     - run: cargo fuzz build --dev -s none --fuzz-dir ./cranelift/isle/fuzz
+    - run: cargo fuzz build --dev -s none --fuzz-dir ./cranelift/pulley/fuzz
     - run: cargo fuzz build --dev -s none --fuzz-dir ./crates/environ/fuzz --features component-model
 
     # common logic to cancel the entire run if this job fails

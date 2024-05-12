@@ -916,6 +916,22 @@ macro_rules! isle_common_prelude_methods {
             val as i8
         }
 
+        fn u64_as_u8(&mut self, val: u64) -> u8 {
+            val as u8
+        }
+
+        fn u64_as_u16(&mut self, val: u64) -> u16 {
+            val as u16
+        }
+
+        fn u16_try_from_u64(&mut self, val: u64) -> Option<u16> {
+            u16::try_from(val).ok()
+        }
+
+        fn u32_try_from_u64(&mut self, val: u64) -> Option<u32> {
+            u32::try_from(val).ok()
+        }
+
         fn u128_replicated_u64(&mut self, val: u128) -> Option<u64> {
             let low64 = val as u64 as u128;
             if (low64 | (low64 << 64)) == val {

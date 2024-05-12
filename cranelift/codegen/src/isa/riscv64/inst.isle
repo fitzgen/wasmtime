@@ -2413,11 +2413,7 @@
 ;; helper function to store to memory.
 (decl gen_store (AMode StoreOP MemFlags Reg) InstOutput)
 (rule (gen_store amode op flags src)
-  (side_effect (SideEffectNoResult.Inst (MInst.Store amode op flags src))))
-
-
-
-
+      (side_effect (SideEffectNoResult.Inst (MInst.Store amode op flags src))))
 (decl valid_atomic_transaction (Type) Type)
 (extern extractor valid_atomic_transaction valid_atomic_transaction)
 

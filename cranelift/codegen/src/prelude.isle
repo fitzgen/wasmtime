@@ -84,6 +84,18 @@
 (extern constructor u16_as_u64 u16_as_u64)
 (convert u16 u64 u16_as_u64)
 
+(decl pure u64_as_u8 (u64) u8)
+(extern constructor u64_as_u8 u64_as_u8)
+
+(decl pure u64_as_u16 (u64) u16)
+(extern constructor u64_as_u16 u64_as_u16)
+
+(decl pure partial u16_try_from_u64 (u64) u16)
+(extern constructor u16_try_from_u64 u16_try_from_u64)
+
+(decl pure partial u32_try_from_u64 (u64) u32)
+(extern constructor u32_try_from_u64 u32_try_from_u64)
+
 (decl pure u32_as_u64 (u32) u64)
 (extern constructor u32_as_u64 u32_as_u64)
 (convert u32 u64 u32_as_u64)
