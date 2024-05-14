@@ -8,6 +8,8 @@
 //! disabled by specifying a batch size of one, in which case, this queue will
 //! immediately get flushed everytime we push onto it.
 
+mod madvisev;
+
 use super::PoolingInstanceAllocator;
 use crate::{MemoryAllocationIndex, MemoryImageSlot, Table, TableAllocationIndex};
 use smallvec::SmallVec;
@@ -149,12 +151,15 @@ impl DecommitQueue {
     }
 
     fn decommit_all_raw(&mut self) {
-        for iovec in self.raw.drain(..) {
+        for chunk in self.raw.chunks(1024) {
             unsafe {
-                crate::sys::vm::decommit_pages(iovec.0.iov_base.cast(), iovec.0.iov_len)
-                    .expect("failed to decommit pages");
+                madvisev::madvisev(
+                    std::mem::transmute::<&[IoVec], &[libc::iovec]>(chunk),
+                    libc::MADV_DONTNEED,
+                )
             }
         }
+        self.raw.clear();
     }
 
     /// Flush this queue, decommitting all enqueued regions in batch.
