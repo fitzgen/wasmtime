@@ -5,6 +5,7 @@
 
 use crate::prelude::*;
 use crate::sync::RwLock;
+use crate::vm::{GcLayout, GcRuntime};
 use crate::Engine;
 use alloc::borrow::Cow;
 use alloc::sync::Arc;
@@ -111,7 +112,11 @@ impl TypeCollection {
     pub fn new_for_module(engine: &Engine, module_types: &ModuleTypes) -> Self {
         let engine = engine.clone();
         let registry = engine.signatures();
-        let (rec_groups, types) = registry.0.write().register_module_types(module_types);
+        let gc_runtime = engine.gc_runtime();
+        let (rec_groups, types) = registry
+            .0
+            .write()
+            .register_module_types(&**gc_runtime, module_types);
 
         let mut trampolines = SecondaryMap::with_capacity(types.len());
         for (module_ty, trampoline) in module_types.trampoline_types() {
@@ -276,6 +281,7 @@ impl RegisteredType {
         let (entry, index, ty) = {
             log::trace!("RegisteredType::new({ty:?})");
 
+            let gc_runtime = engine.gc_runtime();
             let mut inner = engine.signatures().0.write();
 
             // It shouldn't be possible for users to construct non-canonical
@@ -286,7 +292,7 @@ impl RegisteredType {
             // engine mismatch; those should be caught earlier.
             inner.assert_canonicalized_for_runtime_usage_in_this_registry(&ty);
 
-            let entry = inner.register_singleton_rec_group(ty);
+            let entry = inner.register_singleton_rec_group(&**gc_runtime, ty);
 
             let index = entry.0.shared_type_indices[0];
             let id = shared_type_index_to_slab_id(index);
@@ -477,6 +483,13 @@ struct TypeRegistryInner {
     // doesn't play well with.
     type_to_trampoline: SecondaryMap<VMSharedTypeIndex, PackedOption<VMSharedTypeIndex>>,
 
+    // A map from each registered GC type to its layout.
+    //
+    // Function types do not have an entry in this map. Similar to the
+    // `type_to_{supertypes,trampoline}` maps, we completely omit the `None`
+    // entries for these types as a memory optimization.
+    type_to_gc_layout: SecondaryMap<VMSharedTypeIndex, Option<GcLayout>>,
+
     // An explicit stack of entries that we are in the middle of dropping. Used
     // to avoid recursion when dropping a type that is holding the last
     // reference to another type, etc...
@@ -486,6 +499,7 @@ struct TypeRegistryInner {
 impl TypeRegistryInner {
     fn register_module_types(
         &mut self,
+        gc_runtime: &dyn GcRuntime,
         types: &ModuleTypes,
     ) -> (
         Vec<RecGroupEntry>,
@@ -500,6 +514,7 @@ impl TypeRegistryInner {
 
         for (_rec_group_index, module_group) in types.rec_groups() {
             let entry = self.register_rec_group(
+                gc_runtime,
                 &map,
                 module_group.clone(),
                 iter_entity_range(module_group.clone()).map(|ty| types[ty].clone()),
@@ -548,6 +563,7 @@ impl TypeRegistryInner {
     /// on behalf of callers.
     fn register_rec_group(
         &mut self,
+        gc_runtime: &dyn GcRuntime,
         map: &PrimaryMap<ModuleInternedTypeIndex, VMSharedTypeIndex>,
         range: Range<ModuleInternedTypeIndex>,
         types: impl ExactSizeIterator<Item = WasmSubType>,
@@ -597,7 +613,7 @@ impl TypeRegistryInner {
         // the fully-constructed entry for its values.
         let module_rec_group_start = range.start;
         let engine_rec_group_start = u32::try_from(self.types.len()).unwrap();
-        let shared_type_indices = non_canon_types
+        let shared_type_indices: Box<[_]> = non_canon_types
             .into_iter()
             .map(|(module_index, mut ty)| {
                 ty.canonicalize_for_runtime_usage(&mut |idx| {
@@ -608,7 +624,7 @@ impl TypeRegistryInner {
                         VMSharedTypeIndex::from_u32(engine_rec_group_start + rec_group_offset)
                     }
                 });
-                self.insert_one_type_from_rec_group(module_index, ty)
+                self.insert_one_type_from_rec_group(gc_runtime, module_index, ty)
             })
             .collect();
 
@@ -644,11 +660,16 @@ impl TypeRegistryInner {
                         // This will recursively call into rec group
                         // registration, but at most once since trampoline
                         // function types are their own trampoline type.
-                        let trampoline_entry = self.register_singleton_rec_group(WasmSubType {
-                            is_final: true,
-                            supertype: None,
-                            composite_type: wasmtime_environ::WasmCompositeType::Func(trampoline),
-                        });
+                        let trampoline_entry = self.register_singleton_rec_group(
+                            gc_runtime,
+                            WasmSubType {
+                                is_final: true,
+                                supertype: None,
+                                composite_type: wasmtime_environ::WasmCompositeType::Func(
+                                    trampoline,
+                                ),
+                            },
+                        );
                         let trampoline_index = trampoline_entry.0.shared_type_indices[0];
                         log::trace!(
                             "Registering trampoline {trampoline_index:?} for function type {shared_type_index:?}"
@@ -688,6 +709,7 @@ impl TypeRegistryInner {
     /// an already-registered rec group.
     fn insert_one_type_from_rec_group(
         &mut self,
+        gc_runtime: &dyn GcRuntime,
         module_index: ModuleInternedTypeIndex,
         ty: WasmSubType,
     ) -> VMSharedTypeIndex {
@@ -701,6 +723,16 @@ impl TypeRegistryInner {
             ty.is_canonicalized_for_runtime_usage(),
             "type is not canonicalized for runtime usage: {ty:?}"
         );
+
+        let gc_layout = match &ty.composite_type {
+            wasmtime_environ::WasmCompositeType::Func(_) => None,
+            wasmtime_environ::WasmCompositeType::Array(a) => {
+                Some(gc_runtime.array_layout(a).into())
+            }
+            wasmtime_environ::WasmCompositeType::Struct(s) => {
+                Some(gc_runtime.struct_layout(s).into())
+            }
+        };
 
         // Add the type to our slab.
         let id = self.types.alloc(Arc::new(ty));
@@ -724,6 +756,13 @@ impl TypeRegistryInner {
             self.type_to_supertypes[engine_index] = Some(supertypes.into_boxed_slice());
         }
 
+        // Only write the type-to-gc-layout entry if we have a GC layout, so
+        // that the map can avoid any heap allocation for backing storage in the
+        // case where Wasm GC is disabled.
+        if let Some(layout) = gc_layout {
+            self.type_to_gc_layout[engine_index] = Some(layout);
+        }
+
         engine_index
     }
 
@@ -745,7 +784,11 @@ impl TypeRegistryInner {
     ///
     /// The returned entry will have already had its reference count incremented
     /// on behalf of callers.
-    fn register_singleton_rec_group(&mut self, ty: WasmSubType) -> RecGroupEntry {
+    fn register_singleton_rec_group(
+        &mut self,
+        gc_runtime: &dyn GcRuntime,
+        ty: WasmSubType,
+    ) -> RecGroupEntry {
         self.assert_canonicalized_for_runtime_usage_in_this_registry(&ty);
 
         // This type doesn't have any module-level type references, since it is
@@ -759,7 +802,7 @@ impl TypeRegistryInner {
         let range = ModuleInternedTypeIndex::from_bits(u32::MAX - 1)
             ..ModuleInternedTypeIndex::from_bits(u32::MAX);
 
-        self.register_rec_group(&map, range, iter::once(ty))
+        self.register_rec_group(gc_runtime, &map, range, iter::once(ty))
     }
 
     /// Unregister all of a type collection's rec groups.
@@ -882,6 +925,7 @@ impl Drop for TypeRegistryInner {
             type_to_rec_group,
             type_to_supertypes,
             type_to_trampoline,
+            type_to_gc_layout,
             drop_stack,
         } = self;
         assert!(
@@ -903,6 +947,10 @@ impl Drop for TypeRegistryInner {
         assert!(
             type_to_trampoline.is_empty() || type_to_trampoline.values().all(|x| x.is_none()),
             "type registry not empty: type-to-trampoline map is not empty: {type_to_trampoline:#?}"
+        );
+        assert!(
+            type_to_gc_layout.is_empty() || type_to_gc_layout.values().all(|x| x.is_none()),
+            "type registry not empty: type-to-gc-layout map is not empty: {type_to_gc_layout:#?}"
         );
         assert!(
             drop_stack.is_empty(),

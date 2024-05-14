@@ -139,6 +139,9 @@ impl ValType {
     /// The `i31ref` type, aka `(ref null i31)`.
     pub const I31REF: Self = ValType::Ref(RefType::I31REF);
 
+    /// The `structref` type, aka `(ref null struct)`.
+    pub const STRUCTREF: Self = ValType::Ref(RefType::STRUCTREF);
+
     /// The `nullref` type, aka `(ref null none)`.
     pub const NULLREF: Self = ValType::Ref(RefType::NULLREF);
 
@@ -393,6 +396,12 @@ impl RefType {
     pub const I31REF: Self = RefType {
         is_nullable: true,
         heap_type: HeapType::I31,
+    };
+
+    /// The `structref` type, aka `(ref null struct)`.
+    pub const STRUCTREF: Self = RefType {
+        is_nullable: true,
+        heap_type: HeapType::Struct,
     };
 
     /// The `nullref` type, aka `(ref null none)`.
@@ -1585,6 +1594,10 @@ impl StructType {
 
     pub(crate) fn as_wasm_struct_type(&self) -> &WasmStructType {
         self.registered_type.unwrap_struct()
+    }
+
+    pub(crate) fn registered_type(&self) -> &RegisteredType {
+        &self.registered_type
     }
 
     /// Construct a `StructType` from a `WasmStructType`.

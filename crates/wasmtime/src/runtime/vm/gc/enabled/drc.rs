@@ -42,10 +42,12 @@
 //! <https://openresearch-repository.anu.edu.au/bitstream/1885/42030/2/hon-thesis.pdf>
 
 use super::free_list::FreeList;
+use super::{VMStructDataMut, VMStructRef};
 use crate::prelude::*;
 use crate::runtime::vm::{
-    ExternRefHostDataId, ExternRefHostDataTable, GarbageCollection, GcHeap, GcHeapObject,
-    GcProgress, GcRootsIter, GcRuntime, Mmap, TypedGcRef, VMExternRef, VMGcHeader, VMGcRef,
+    ExternRefHostDataId, ExternRefHostDataTable, GarbageCollection, GcArrayLayout, GcHeap,
+    GcHeapObject, GcProgress, GcRootsIter, GcRuntime, GcStructLayout, Mmap, TypedGcRef,
+    VMExternRef, VMGcHeader, VMGcRef,
 };
 use core::ops::{Deref, DerefMut};
 use core::{
@@ -72,6 +74,14 @@ unsafe impl GcRuntime for DrcCollector {
     fn new_gc_heap(&self) -> Result<Box<dyn GcHeap>> {
         let heap = DrcHeap::new()?;
         Ok(Box::new(heap) as _)
+    }
+
+    fn array_layout(&self, ty: &wasmtime_environ::WasmArrayType) -> GcArrayLayout {
+        todo!("FITZGEN")
+    }
+
+    fn struct_layout(&self, ty: &wasmtime_environ::WasmStructType) -> GcStructLayout {
+        todo!("FITZGEN")
     }
 }
 
@@ -546,6 +556,23 @@ unsafe impl GcHeap for DrcHeap {
     fn externref_host_data(&self, externref: &VMExternRef) -> ExternRefHostDataId {
         let typed_ref = externref_to_drc(externref);
         self.index(typed_ref).host_data
+    }
+
+    fn alloc_uninit_struct(
+        &mut self,
+        ty: wasmtime_environ::VMSharedTypeIndex,
+        layout: &GcStructLayout,
+    ) -> Result<VMStructRef> {
+        todo!("FITZGEN")
+    }
+
+    fn struct_data(&mut self, structref: &VMStructRef, size: u32) -> VMStructDataMut<'_> {
+        let start = structref.as_gc_ref().as_heap_index().unwrap().get();
+        let start = usize::try_from(start).unwrap();
+        let size = usize::try_from(size).unwrap();
+        let end = start + size;
+        let data = &mut self.heap_slice_mut()[start..end];
+        VMStructDataMut::new(data)
     }
 
     fn gc<'a>(

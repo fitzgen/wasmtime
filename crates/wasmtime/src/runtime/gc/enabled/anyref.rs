@@ -1,6 +1,9 @@
 //! Implementation of `anyref` in Wasmtime.
 
+use wasmtime_environ::VMGcKind;
+
 use crate::runtime::vm::VMGcRef;
+use crate::StructRef;
 use crate::{
     store::{AutoAssertNoGc, StoreOpaque},
     AsContext, AsContextMut, GcRefImpl, GcRootIndex, HeapType, ManuallyRooted, RefType, Result,
@@ -90,7 +93,7 @@ use core::mem::MaybeUninit;
 #[derive(Debug)]
 #[repr(transparent)]
 pub struct AnyRef {
-    inner: GcRootIndex,
+    pub(super) inner: GcRootIndex,
 }
 
 unsafe impl GcRefImpl for AnyRef {
@@ -241,6 +244,53 @@ impl AnyRef {
     /// Returns an `Err(_)` if this reference has been unrooted.
     pub fn unwrap_i31(&self, store: impl AsContext) -> Result<I31> {
         Ok(self.as_i31(store)?.expect("AnyRef::unwrap_i31 on non-i31"))
+    }
+
+    /// Is this `anyref` a `structref`?
+    ///
+    /// Returns an `Err(_)` if this reference has been unrooted.
+    pub fn is_struct(&self, store: impl AsContext) -> Result<bool> {
+        self._is_struct(store.as_context().0)
+    }
+
+    pub(crate) fn _is_struct(&self, store: &StoreOpaque) -> Result<bool> {
+        // NB: Can't use `AutoAssertNoGc` here because we only have a shared
+        // context, not a mutable context.
+        let gc_ref = self.inner.unchecked_try_gc_ref(store)?;
+        Ok(store.gc_store()?.kind(gc_ref).matches(VMGcKind::StructRef))
+    }
+
+    /// Downcast this `anyref` to a `structref`.
+    ///
+    /// If this `anyref` is a `structref`, then `Some(_)` is returned.
+    ///
+    /// If this `anyref` is not a `structref`, then `None` is returned.
+    ///
+    /// Returns an `Err(_)` if this reference has been unrooted.
+    pub fn as_struct(&self, store: impl AsContext) -> Result<Option<Rooted<StructRef>>> {
+        self._as_struct(store.as_context().0)
+    }
+
+    pub(crate) fn _as_struct(&self, store: &StoreOpaque) -> Result<Option<Rooted<StructRef>>> {
+        if self._is_struct(store)? {
+            Ok(Some(Rooted::from_gc_root_index(self.inner)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Downcast this `anyref` to an `i31`, panicking if this `anyref` is not an
+    /// `i31`.
+    ///
+    /// Returns an `Err(_)` if this reference has been unrooted.
+    pub fn unwrap_struct(&self, mut store: impl AsContext) -> Result<Rooted<StructRef>> {
+        self._unwrap_struct(store.as_context().0)
+    }
+
+    pub(crate) fn _unwrap_struct(&self, store: &StoreOpaque) -> Result<Rooted<StructRef>> {
+        Ok(self
+            ._as_struct(store)?
+            .expect("AnyRef::unwrap_struct on non-structref"))
     }
 }
 

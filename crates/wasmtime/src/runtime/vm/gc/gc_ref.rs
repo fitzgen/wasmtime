@@ -23,7 +23,7 @@ use wasmtime_environ::{VMGcKind, VMSharedTypeIndex};
 ///
 ///     // The `VMSharedTypeIndex` for this GC object, if it isn't an
 ///     // `externref` (or an `externref` re-wrapped as an `anyref`). `None` is
-///     // represented with `VMSharedTypeIndex::default()`.
+///     // represented with `VMSharedTypeIndex::reserved_value()`.
 ///     ty: Option<VMSharedTypeIndex>,
 /// }
 /// ```
@@ -49,7 +49,7 @@ impl VMGcHeader {
     /// Get the kind of GC object that this is.
     pub fn kind(&self) -> VMGcKind {
         let upper = u32::try_from(self.0 >> 32).unwrap();
-        VMGcKind::from_u32(upper)
+        VMGcKind::from_high_bits_of_u32(upper)
     }
 
     /// Get the reserved 30 bits in this header.
@@ -82,6 +82,7 @@ impl VMGcHeader {
     /// The given `value` must only use the lower 30 bits; its upper 2 bits must
     /// be unset.
     pub unsafe fn unchecked_set_reserved_u30(&mut self, value: u32) {
+        // TODO FITZGEN: 26 bits now
         self.0 |= u64::from(value) << 32;
     }
 

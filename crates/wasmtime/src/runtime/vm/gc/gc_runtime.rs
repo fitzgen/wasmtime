@@ -3,10 +3,14 @@
 use crate::prelude::*;
 use crate::runtime::vm::{
     ExternRefHostDataId, ExternRefHostDataTable, SendSyncPtr, VMExternRef, VMGcHeader, VMGcRef,
+    VMStructRef,
 };
 use core::marker;
 use core::ptr;
 use core::{any::Any, num::NonZeroUsize};
+use wasmtime_environ::{VMSharedTypeIndex, WasmArrayType, WasmStructType};
+
+use super::VMStructDataMut;
 
 /// Trait for integrating a garbage collector with the runtime.
 ///
@@ -32,6 +36,12 @@ use core::{any::Any, num::NonZeroUsize};
 pub unsafe trait GcRuntime: 'static + Send + Sync {
     /// Construct a new GC heap.
     fn new_gc_heap(&self) -> Result<Box<dyn GcHeap>>;
+
+    /// TODO FITZGEN
+    fn array_layout(&self, ty: &WasmArrayType) -> GcArrayLayout;
+
+    /// TODO FITZGEN
+    fn struct_layout(&self, ty: &WasmStructType) -> GcStructLayout;
 }
 
 /// A heap that manages garbage-collected objects.
@@ -200,6 +210,30 @@ pub unsafe trait GcHeap: 'static + Send + Sync {
     fn externref_host_data(&self, externref: &VMExternRef) -> ExternRefHostDataId;
 
     ////////////////////////////////////////////////////////////////////////////
+    // Struct and Array methods
+
+    /// Allocate a GC-managed struct of the given type and layout.
+    ///
+    /// The struct's fields are left uninitialized. It is the caller's
+    /// responsibility to initialize them before exposing the struct to Wasm or
+    /// triggering a GC. Failure to do so is memory safe, but may result in
+    /// general failures such as panics or incorrect results.
+    fn alloc_uninit_struct(
+        &mut self,
+        ty: VMSharedTypeIndex,
+        layout: &GcStructLayout,
+    ) -> Result<VMStructRef>;
+
+    /// Get a mutable borrow of the the given struct's data.
+    ///
+    /// Panics on out-of-bounds accesses.
+    ///
+    /// The given `structref` should be valid and of the given size. Failure to
+    /// do so is memory safe, but may result in general failures such as panics
+    /// or incorrect results.
+    fn struct_data(&mut self, structref: &VMStructRef, size: u32) -> VMStructDataMut<'_>;
+
+    ////////////////////////////////////////////////////////////////////////////
     // Garbage Collection Methods
 
     /// Start a new garbage collection process.
@@ -282,6 +316,50 @@ pub unsafe trait GcHeap: 'static + Send + Sync {
     /// This method is only used with the pooling allocator.
     #[cfg(feature = "pooling-allocator")]
     fn reset(&mut self);
+}
+
+/// The layout of a GC-managed object.
+#[derive(Clone, Debug)]
+pub enum GcLayout {
+    /// The layout of a GC-managed array object.
+    Array(GcArrayLayout),
+    /// The layout of a GC-managed struct object.
+    Struct(GcStructLayout),
+}
+
+impl From<GcArrayLayout> for GcLayout {
+    fn from(layout: GcArrayLayout) -> Self {
+        Self::Array(layout)
+    }
+}
+
+impl From<GcStructLayout> for GcLayout {
+    fn from(layout: GcStructLayout) -> Self {
+        Self::Struct(layout)
+    }
+}
+
+/// TODO FITZGEN
+#[derive(Clone, Debug)]
+pub struct GcArrayLayout {
+    /// TODO FITZGEN
+    pub length_field_offset: u32,
+    /// TODO FITZGEN
+    pub length_field_mask: Option<u32>,
+    /// TODO FITZGEN
+    pub elems_offset: u32,
+}
+
+/// The layout for a GC-managed struct type.
+#[derive(Clone, Debug)]
+pub struct GcStructLayout {
+    /// The size of this struct.
+    pub size: u32,
+    /// The alignment of this struct.
+    pub align: u32,
+    /// The fields of this struct. The `i`th entry is the `i`th struct field's
+    /// offset in the struct.
+    pub fields: Vec<u32>,
 }
 
 /// A list of GC roots.

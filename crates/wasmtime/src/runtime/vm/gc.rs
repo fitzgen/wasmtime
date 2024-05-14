@@ -22,7 +22,7 @@ use crate::prelude::*;
 use crate::runtime::vm::GcHeapAllocationIndex;
 use core::ptr;
 use core::{any::Any, num::NonZeroUsize};
-use wasmtime_environ::StackMap;
+use wasmtime_environ::{StackMap, VMGcKind, VMSharedTypeIndex};
 
 /// Used by the runtime to lookup information about a module given a
 /// program counter value.
@@ -78,6 +78,18 @@ impl GcStore {
     pub async fn gc_async(&mut self, roots: GcRootsIter<'_>) {
         let collection = self.gc_heap.gc(roots, &mut self.host_data_table);
         collect_async(collection).await;
+    }
+
+    /// Get the kind of the given GC reference.
+    pub fn kind(&self, gc_ref: &VMGcRef) -> VMGcKind {
+        debug_assert!(!gc_ref.is_i31());
+        self.header(gc_ref).kind()
+    }
+
+    /// Get the header of the given GC reference.
+    pub fn header(&self, gc_ref: &VMGcRef) -> &VMGcHeader {
+        debug_assert!(!gc_ref.is_i31());
+        self.gc_heap.header(gc_ref)
     }
 
     /// Clone a GC reference, calling GC write barriers as necessary.
@@ -164,6 +176,20 @@ impl GcStore {
         let host_data_id = self.gc_heap.externref_host_data(externref);
         self.host_data_table.get_mut(host_data_id)
     }
+
+    /// TODO FITZGEN
+    pub fn alloc_uninit_struct(
+        &mut self,
+        ty: VMSharedTypeIndex,
+        layout: &GcStructLayout,
+    ) -> Result<VMStructRef> {
+        self.gc_heap.alloc_uninit_struct(ty, layout)
+    }
+
+    /// TODO FITZGEN
+    pub fn struct_data(&mut self, structref: &VMStructRef, size: u32) -> VMStructDataMut<'_> {
+        self.gc_heap.struct_data(structref, size)
+    }
 }
 
 /// Get a no-op GC heap for when GC is disabled (either statically at compile
@@ -212,6 +238,19 @@ pub fn disabled_gc_heap() -> Box<dyn GcHeap> {
             )
         }
         fn externref_host_data(&self, _externref: &VMExternRef) -> ExternRefHostDataId {
+            unreachable!()
+        }
+        fn alloc_uninit_struct(
+            &mut self,
+            ty: wasmtime_environ::VMSharedTypeIndex,
+            layout: &GcStructLayout,
+        ) -> Result<VMStructRef> {
+            bail!(
+                "GC support disabled either in the `Config` or at compile time \
+                 because the `gc` cargo feature was not enabled"
+            )
+        }
+        fn struct_data(&mut self, structref: &VMStructRef, size: u32) -> VMStructDataMut<'_> {
             unreachable!()
         }
         fn gc<'a>(
