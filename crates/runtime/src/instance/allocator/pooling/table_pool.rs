@@ -2,7 +2,7 @@ use super::{
     index_allocator::{SimpleIndexAllocator, SlotId},
     round_up_to_pow2, TableAllocationIndex,
 };
-use crate::sys::vm::{commit_table_pages, decommit_table_pages};
+use crate::sys::vm::{commit_pages, decommit_pages};
 use crate::{InstanceAllocationRequest, Mmap, PoolingInstanceAllocatorConfig, SendSyncPtr, Table};
 use anyhow::{anyhow, bail, Context, Result};
 use std::mem;
@@ -130,7 +130,7 @@ impl TablePool {
             let base = self.get(allocation_index);
 
             unsafe {
-                commit_table_pages(
+                commit_pages(
                     base as *mut u8,
                     self.table_elements * mem::size_of::<*mut u8>(),
                 )?;
@@ -181,7 +181,7 @@ impl TablePool {
         let size_to_memset = size.min(self.keep_resident);
         unsafe {
             std::ptr::write_bytes(base, 0, size_to_memset);
-            decommit_table_pages(base.add(size_to_memset), size - size_to_memset)
+            decommit_pages(base.add(size_to_memset), size - size_to_memset)
                 .context("failed to decommit table page")?;
         }
         Ok(())
