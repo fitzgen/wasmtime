@@ -167,7 +167,7 @@ unsafe impl InstanceAllocatorImpl for OnDemandInstanceAllocator {
     }
 
     #[cfg(feature = "async")]
-    unsafe fn deallocate_fiber_stack(&self, _stack: &wasmtime_fiber::FiberStack) {
+    unsafe fn deallocate_fiber_stack(&self, _stack: wasmtime_fiber::FiberStack) {
         // The on-demand allocator has no further bookkeeping for fiber stacks
     }
 

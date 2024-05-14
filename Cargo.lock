@@ -3619,6 +3619,7 @@ dependencies = [
  "psm",
  "rand",
  "rustix",
+ "smallvec",
  "sptr",
  "wasm-encoder",
  "wasmtime-asm-macros",

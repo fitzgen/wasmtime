@@ -92,6 +92,10 @@ impl FiberStack {
         })
     }
 
+    pub fn is_from_raw_parts(&self) -> bool {
+        matches!(self, Self::Default { mmap: false, .. })
+    }
+
     pub fn from_custom(custom: Box<dyn RuntimeFiberStack>) -> io::Result<Self> {
         Ok(Self::Custom(custom))
     }

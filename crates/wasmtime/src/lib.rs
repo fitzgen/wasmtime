@@ -478,6 +478,9 @@ pub use crate::coredump::*;
 /// This type alias is identical to `anyhow::Result`.
 pub use anyhow::{Error, Result};
 
+#[cfg(feature = "pooling-allocator")]
+pub use wasmtime_runtime::PoolConcurrencyLimitError;
+
 #[cfg(feature = "component-model")]
 pub mod component;
 
