@@ -785,6 +785,7 @@ name = "cranelift-pulley"
 version = "0.109.0"
 dependencies = [
  "arbitrary",
+ "env_logger",
  "log",
 ]
 

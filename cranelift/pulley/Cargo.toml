@@ -13,11 +13,14 @@ workspace = true
 
 [dependencies]
 arbitrary = { workspace = true, optional = true }
-log = { workspace = true, optional = true }
+log = { workspace = true }
+
+[dev-dependencies]
+env_logger = { workspace = true }
 
 [features]
 std = []
-arbitrary = ["dep:arbitrary", "arbitrary/derive"]
+arbitrary = ["dep:arbitrary", "arbitrary/derive", "std"]
 encode = []
 decode = []
 disas = ["decode"]

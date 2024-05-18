@@ -8,7 +8,7 @@ edition.workspace = true
 cargo-fuzz = true
 
 [dependencies]
-cranelift-pulley = { path = "..", features = ["encode", "decode", "disas", "std", "arbitrary"] }
+cranelift-pulley = { path = "..", features = ["encode", "decode", "disas", "interp", "arbitrary"] }
 env_logger = { workspace = true }
 libfuzzer-sys = { workspace = true }
 log = { workspace = true }
@@ -16,6 +16,13 @@ log = { workspace = true }
 [[bin]]
 name = "roundtrip"
 path = "fuzz_targets/roundtrip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "interp"
+path = "fuzz_targets/interp.rs"
 test = false
 doc = false
 bench = false

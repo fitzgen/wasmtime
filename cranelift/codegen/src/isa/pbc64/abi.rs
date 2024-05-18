@@ -54,6 +54,9 @@ impl ABIMachineSpec for Pbc64MachineDeps {
         add_ret_area_ptr: bool,
         mut args: ArgsAccumulator,
     ) -> CodegenResult<(u32, Option<usize>)> {
+        // NB: make sure this method stays in sync with
+        // `cranelift_pulley::interp::Vm::call`.
+
         let x_end = 15;
         let f_end = 15;
         let v_end = 15;

@@ -69,17 +69,37 @@ define_registers! {
 impl XReg {
     /// The valid special register range.
     pub const SPECIAL_RANGE: Range<u8> = 32..37;
+
+    /// TODO FITZGEN
+    pub const SP: Self = Self(32);
+
+    /// TODO FITZGEN
+    pub const LR: Self = Self(33);
+
+    /// TODO FITZGEN
+    pub const FP: Self = Self(34);
+
+    /// TODO FITZGEN
+    pub const SPILL_TMP_0: Self = Self(35);
+
+    /// TODO FITZGEN
+    pub const SPILL_TMP_1: Self = Self(36);
+
+    /// TODO FITZGEN
+    pub fn is_special(&self) -> bool {
+        self.0 >= Self::SPECIAL_RANGE.start
+    }
 }
 
 impl core::fmt::Display for XReg {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self.0 {
-            32 => write!(f, "sp"),
-            33 => write!(f, "lr"),
-            34 => write!(f, "fp"),
-            35 => write!(f, "spilltmp0"),
-            36 => write!(f, "spilltmp1"),
-            x => write!(f, "x{x}"),
+        match self {
+            x if *x == Self::SP => write!(f, "sp"),
+            x if *x == Self::LR => write!(f, "lr"),
+            x if *x == Self::FP => write!(f, "fp"),
+            x if *x == Self::SPILL_TMP_0 => write!(f, "spilltmp0"),
+            x if *x == Self::SPILL_TMP_1 => write!(f, "spilltmp1"),
+            Self(x) => write!(f, "x{x}"),
         }
     }
 }

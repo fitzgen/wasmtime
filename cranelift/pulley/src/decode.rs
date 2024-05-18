@@ -74,6 +74,22 @@ impl core::fmt::Display for DecodingError {
 impl std::error::Error for DecodingError {}
 
 trait DecodeRawMethods {
+    type Bytecode<'a>: Copy;
+    fn advance(bytecode: &mut Self::Bytecode<'_>, position: &mut usize, bytes: usize);
+    fn get1(bytecode: &mut Self::Bytecode<'_>, position: &mut usize) -> Result<u8, Self::Error>;
+    fn get2(
+        bytecode: &mut Self::Bytecode<'_>,
+        position: &mut usize,
+    ) -> Result<[u8; 2], Self::Error>;
+    fn get4(
+        bytecode: &mut Self::Bytecode<'_>,
+        position: &mut usize,
+    ) -> Result<[u8; 4], Self::Error>;
+    fn get8(
+        bytecode: &mut Self::Bytecode<'_>,
+        position: &mut usize,
+    ) -> Result<[u8; 8], Self::Error>;
+
     type Error;
     fn unexpected_eof(position: usize) -> Self::Error;
     fn invalid_opcode(position: usize, code: u8) -> Self::Error;
@@ -83,6 +99,44 @@ trait DecodeRawMethods {
 
 struct SafeDecodeRawMethods;
 impl DecodeRawMethods for SafeDecodeRawMethods {
+    type Bytecode<'a> = &'a [u8];
+    fn advance(bytecode: &mut Self::Bytecode<'_>, position: &mut usize, bytes: usize) {
+        *bytecode = &bytecode.get(bytes..).unwrap();
+        *position += bytes;
+    }
+    fn get1(bytecode: &mut Self::Bytecode<'_>, position: &mut usize) -> Result<u8, Self::Error> {
+        let byte = bytecode
+            .get(0)
+            .copied()
+            .ok_or_else(|| Self::unexpected_eof(*position))?;
+        Self::advance(bytecode, position, 1);
+        Ok(byte)
+    }
+    fn get2(
+        bytecode: &mut Self::Bytecode<'_>,
+        position: &mut usize,
+    ) -> Result<[u8; 2], Self::Error> {
+        let a = Self::get1(bytecode, position)?;
+        let b = Self::get1(bytecode, position)?;
+        Ok([a, b])
+    }
+    fn get4(
+        bytecode: &mut Self::Bytecode<'_>,
+        position: &mut usize,
+    ) -> Result<[u8; 4], Self::Error> {
+        let [a, b] = Self::get2(bytecode, position)?;
+        let [c, d] = Self::get2(bytecode, position)?;
+        Ok([a, b, c, d])
+    }
+    fn get8(
+        bytecode: &mut Self::Bytecode<'_>,
+        position: &mut usize,
+    ) -> Result<[u8; 8], Self::Error> {
+        let [a, b, c, d] = Self::get4(bytecode, position)?;
+        let [e, f, g, h] = Self::get4(bytecode, position)?;
+        Ok([a, b, c, d, e, f, g, h])
+    }
+
     type Error = DecodingError;
     fn unexpected_eof(position: usize) -> Self::Error {
         DecodingError::UnexpectedEof { position }
@@ -102,6 +156,47 @@ enum Uninhabited {}
 
 struct UnsafeDecodeRawMethods;
 impl DecodeRawMethods for UnsafeDecodeRawMethods {
+    type Bytecode<'a> = *mut u8;
+    fn advance(bytecode: &mut Self::Bytecode<'_>, position: &mut usize, bytes: usize) {
+        unsafe {
+            *bytecode = bytecode.add(bytes);
+            *position += bytes;
+        }
+    }
+    fn get1(bytecode: &mut Self::Bytecode<'_>, position: &mut usize) -> Result<u8, Self::Error> {
+        debug_assert!(!bytecode.is_null());
+        let ret = unsafe { **bytecode };
+        Self::advance(bytecode, position, 1);
+        Ok(ret)
+    }
+    fn get2(
+        bytecode: &mut Self::Bytecode<'_>,
+        position: &mut usize,
+    ) -> Result<[u8; 2], Self::Error> {
+        debug_assert!(!bytecode.is_null());
+        let ret = unsafe { *bytecode.cast() };
+        Self::advance(bytecode, position, 2);
+        Ok(ret)
+    }
+    fn get4(
+        bytecode: &mut Self::Bytecode<'_>,
+        position: &mut usize,
+    ) -> Result<[u8; 4], Self::Error> {
+        debug_assert!(!bytecode.is_null());
+        let ret = unsafe { *bytecode.cast() };
+        Self::advance(bytecode, position, 4);
+        Ok(ret)
+    }
+    fn get8(
+        bytecode: &mut Self::Bytecode<'_>,
+        position: &mut usize,
+    ) -> Result<[u8; 8], Self::Error> {
+        debug_assert!(!bytecode.is_null());
+        let ret = unsafe { *bytecode.cast() };
+        Self::advance(bytecode, position, 8);
+        Ok(ret)
+    }
+
     type Error = Uninhabited;
     fn unexpected_eof(_position: usize) -> Self::Error {
         unsafe { crate::unreachable_unchecked() }
@@ -118,164 +213,129 @@ impl DecodeRawMethods for UnsafeDecodeRawMethods {
 }
 
 trait Decode: Sized {
-    fn decode<T>(position: usize, bytecode: &[u8]) -> Result<(usize, Self), T::Error>
+    fn decode<T>(position: &mut usize, bytecode: &mut T::Bytecode<'_>) -> Result<Self, T::Error>
     where
         T: DecodeRawMethods;
 }
 
 impl Decode for u8 {
-    fn decode<T>(position: usize, bytecode: &[u8]) -> Result<(usize, Self), T::Error>
+    fn decode<T>(position: &mut usize, bytecode: &mut T::Bytecode<'_>) -> Result<Self, T::Error>
     where
         T: DecodeRawMethods,
     {
-        let byte = bytecode
-            .get(0)
-            .copied()
-            .ok_or_else(|| T::unexpected_eof(position))?;
-        Ok((1, byte))
+        T::get1(bytecode, position)
     }
 }
 
 impl Decode for u16 {
-    fn decode<T>(position: usize, bytecode: &[u8]) -> Result<(usize, Self), T::Error>
+    fn decode<T>(position: &mut usize, bytecode: &mut T::Bytecode<'_>) -> Result<Self, T::Error>
     where
         T: DecodeRawMethods,
     {
-        let size = core::mem::size_of::<u16>();
-        let (u16_bytes, _) = bytecode
-            .split_at_checked(size)
-            .ok_or_else(|| T::unexpected_eof(position + bytecode.len()))?;
-        Ok((size, u16::from_le_bytes(u16_bytes.try_into().unwrap())))
+        let u16_bytes = T::get2(bytecode, position)?;
+        Ok(u16::from_le_bytes(u16_bytes))
     }
 }
 
 impl Decode for u32 {
-    fn decode<T>(position: usize, bytecode: &[u8]) -> Result<(usize, Self), T::Error>
+    fn decode<T>(position: &mut usize, bytecode: &mut T::Bytecode<'_>) -> Result<Self, T::Error>
     where
         T: DecodeRawMethods,
     {
-        let size = core::mem::size_of::<u32>();
-        let (u32_bytes, _) = bytecode
-            .split_at_checked(size)
-            .ok_or_else(|| T::unexpected_eof(position + bytecode.len()))?;
-        Ok((size, u32::from_le_bytes(u32_bytes.try_into().unwrap())))
+        let u32_bytes = T::get4(bytecode, position)?;
+        Ok(u32::from_le_bytes(u32_bytes))
     }
 }
 
 impl Decode for u64 {
-    fn decode<T>(position: usize, bytecode: &[u8]) -> Result<(usize, Self), T::Error>
+    fn decode<T>(position: &mut usize, bytecode: &mut T::Bytecode<'_>) -> Result<Self, T::Error>
     where
         T: DecodeRawMethods,
     {
-        let size = core::mem::size_of::<u64>();
-        let (u64_bytes, _) = bytecode
-            .split_at_checked(size)
-            .ok_or_else(|| T::unexpected_eof(position + bytecode.len()))?;
-        Ok((size, u64::from_le_bytes(u64_bytes.try_into().unwrap())))
+        let u64_bytes = T::get8(bytecode, position)?;
+        Ok(u64::from_le_bytes(u64_bytes))
     }
 }
 
 impl Decode for i8 {
-    fn decode<T>(position: usize, bytecode: &[u8]) -> Result<(usize, Self), T::Error>
+    fn decode<T>(position: &mut usize, bytecode: &mut T::Bytecode<'_>) -> Result<Self, T::Error>
     where
         T: DecodeRawMethods,
     {
-        let byte = bytecode
-            .get(0)
-            .copied()
-            .ok_or_else(|| T::unexpected_eof(position))?;
-        Ok((1, byte as i8))
+        let byte = T::get1(bytecode, position)?;
+        Ok(byte as i8)
     }
 }
 
 impl Decode for i16 {
-    fn decode<T>(position: usize, bytecode: &[u8]) -> Result<(usize, Self), T::Error>
+    fn decode<T>(position: &mut usize, bytecode: &mut T::Bytecode<'_>) -> Result<Self, T::Error>
     where
         T: DecodeRawMethods,
     {
-        let size = core::mem::size_of::<i16>();
-        let (u16_bytes, _) = bytecode
-            .split_at_checked(size)
-            .ok_or_else(|| T::unexpected_eof(position + bytecode.len()))?;
-        Ok((size, i16::from_le_bytes(u16_bytes.try_into().unwrap())))
+        let u16_bytes = T::get2(bytecode, position)?;
+        Ok(i16::from_le_bytes(u16_bytes))
     }
 }
 
 impl Decode for i32 {
-    fn decode<T>(position: usize, bytecode: &[u8]) -> Result<(usize, Self), T::Error>
+    fn decode<T>(position: &mut usize, bytecode: &mut T::Bytecode<'_>) -> Result<Self, T::Error>
     where
         T: DecodeRawMethods,
     {
-        let size = core::mem::size_of::<i32>();
-        let (u32_bytes, _) = bytecode
-            .split_at_checked(size)
-            .ok_or_else(|| T::unexpected_eof(position + bytecode.len()))?;
-        Ok((size, i32::from_le_bytes(u32_bytes.try_into().unwrap())))
+        let u32_bytes = T::get4(bytecode, position)?;
+        Ok(i32::from_le_bytes(u32_bytes))
     }
 }
 
 impl Decode for i64 {
-    fn decode<T>(position: usize, bytecode: &[u8]) -> Result<(usize, Self), T::Error>
+    fn decode<T>(position: &mut usize, bytecode: &mut T::Bytecode<'_>) -> Result<Self, T::Error>
     where
         T: DecodeRawMethods,
     {
-        let size = core::mem::size_of::<i64>();
-        let (u64_bytes, _) = bytecode
-            .split_at_checked(size)
-            .ok_or_else(|| T::unexpected_eof(position + bytecode.len()))?;
-        Ok((size, i64::from_le_bytes(u64_bytes.try_into().unwrap())))
+        let u64_bytes = T::get8(bytecode, position)?;
+        Ok(i64::from_le_bytes(u64_bytes))
     }
 }
 
 impl Decode for XReg {
-    fn decode<T>(position: usize, bytecode: &[u8]) -> Result<(usize, Self), T::Error>
+    fn decode<T>(position: &mut usize, bytecode: &mut T::Bytecode<'_>) -> Result<Self, T::Error>
     where
         T: DecodeRawMethods,
     {
-        let (size, byte) = u8::decode::<T>(position, bytecode)?;
-        let reg = XReg::new(byte).ok_or_else(|| T::invalid_reg(position + size, byte))?;
-        Ok((size, reg))
+        let byte = u8::decode::<T>(position, bytecode)?;
+        XReg::new(byte).ok_or_else(|| T::invalid_reg(*position - 1, byte))
     }
 }
 
 impl Decode for FReg {
-    fn decode<T>(position: usize, bytecode: &[u8]) -> Result<(usize, Self), T::Error>
+    fn decode<T>(position: &mut usize, bytecode: &mut T::Bytecode<'_>) -> Result<Self, T::Error>
     where
         T: DecodeRawMethods,
     {
-        let (size, byte) = u8::decode::<T>(position, bytecode)?;
-        let reg = FReg::new(byte).ok_or_else(|| T::invalid_reg(position + size, byte))?;
-        Ok((size, reg))
+        let byte = u8::decode::<T>(position, bytecode)?;
+        FReg::new(byte).ok_or_else(|| T::invalid_reg(*position - 1, byte))
     }
 }
 
 impl Decode for VReg {
-    fn decode<T>(position: usize, bytecode: &[u8]) -> Result<(usize, Self), T::Error>
+    fn decode<T>(position: &mut usize, bytecode: &mut T::Bytecode<'_>) -> Result<Self, T::Error>
     where
         T: DecodeRawMethods,
     {
-        let (size, byte) = u8::decode::<T>(position, bytecode)?;
-        let reg = VReg::new(byte).ok_or_else(|| T::invalid_reg(position + size, byte))?;
-        Ok((size, reg))
+        let byte = u8::decode::<T>(position, bytecode)?;
+        VReg::new(byte).ok_or_else(|| T::invalid_reg(*position - 1, byte))
     }
 }
 
 /// TODO FITZGEN
-pub struct Decoder<V> {
-    visitor: V,
+pub struct Decoder {
     position: usize,
 }
 
-impl<V> Decoder<V>
-where
-    V: OpVisitor + ExtendedOpVisitor,
-{
+impl Decoder {
     /// TODO FITZGEN
-    pub fn new(visitor: V) -> Self {
-        Self {
-            visitor,
-            position: 0,
-        }
+    pub fn new() -> Self {
+        Self { position: 0 }
     }
 
     /// TODO FITZGEN
@@ -284,18 +344,36 @@ where
     }
 
     /// TODO FITZGEN
-    pub fn decode_one(&mut self, bytecode: &[u8]) -> Result<V::Return> {
-        unsafe { self.decode_raw::<SafeDecodeRawMethods>(bytecode) }
+    pub fn set_position(&mut self, position: usize) {
+        self.position = position;
     }
 
     /// TODO FITZGEN
-    pub fn decode_one_extended(&mut self, bytecode: &[u8]) -> Result<V::Return> {
-        unsafe { self.decode_extended_raw::<SafeDecodeRawMethods>(bytecode) }
+    pub fn decode_one<V>(&mut self, bytecode: &mut &[u8], visitor: &mut V) -> Result<V::Return>
+    where
+        V: OpVisitor + ExtendedOpVisitor,
+    {
+        unsafe { self.decode_raw::<SafeDecodeRawMethods, V>(bytecode, visitor) }
     }
 
     /// TODO FITZGEN
-    pub fn decode_all(visitor: V, mut bytecode: &[u8]) -> Result<V> {
-        let mut decoder = Decoder::new(visitor);
+    pub fn decode_one_extended<V>(
+        &mut self,
+        bytecode: &mut &[u8],
+        visitor: &mut V,
+    ) -> Result<V::Return>
+    where
+        V: OpVisitor + ExtendedOpVisitor,
+    {
+        unsafe { self.decode_extended_raw::<SafeDecodeRawMethods, V>(bytecode, visitor) }
+    }
+
+    /// TODO FITZGEN
+    pub fn decode_all<V>(mut bytecode: &[u8], visitor: &mut V) -> Result<()>
+    where
+        V: OpVisitor + ExtendedOpVisitor,
+    {
+        let mut decoder = Decoder::new();
 
         while !bytecode.is_empty() {
             let is_extended_op = match bytecode.get(0).copied().and_then(Opcode::new) {
@@ -303,67 +381,44 @@ where
                 _ => false,
             };
 
-            let start = decoder.position;
-            decoder.decode_one(bytecode)?;
-            let size = decoder.position - start;
-            bytecode = &bytecode[size..];
+            decoder.decode_one(&mut bytecode, visitor)?;
 
             if is_extended_op {
-                let start = decoder.position;
-                decoder.decode_one_extended(bytecode)?;
-                let size = decoder.position - start;
-                bytecode = &bytecode[size..];
+                decoder.decode_one_extended(&mut bytecode, visitor)?;
             }
         }
 
-        Ok(decoder.into_visitor())
+        Ok(())
     }
 
     /// TODO FITZGEN
-    pub unsafe fn unchecked_decode_one(&mut self, bytecode: &[u8]) -> V::Return {
-        match self.decode_raw::<UnsafeDecodeRawMethods>(bytecode) {
+    pub unsafe fn unchecked_decode_one<V>(
+        &mut self,
+        bytecode: &mut *mut u8,
+        visitor: &mut V,
+    ) -> V::Return
+    where
+        V: OpVisitor + ExtendedOpVisitor,
+    {
+        match self.decode_raw::<UnsafeDecodeRawMethods, V>(bytecode, visitor) {
             Ok(x) => x,
             Err(uninhabited) => match uninhabited {},
         }
     }
 
     /// TODO FITZGEN
-    pub unsafe fn unchecked_decode_one_extended(&mut self, bytecode: &[u8]) -> V::Return {
-        match self.decode_extended_raw::<UnsafeDecodeRawMethods>(bytecode) {
+    pub unsafe fn unchecked_decode_one_extended<V>(
+        &mut self,
+        bytecode: &mut *mut u8,
+        visitor: &mut V,
+    ) -> V::Return
+    where
+        V: OpVisitor + ExtendedOpVisitor,
+    {
+        match self.decode_extended_raw::<UnsafeDecodeRawMethods, V>(bytecode, visitor) {
             Ok(x) => x,
             Err(uninhabited) => match uninhabited {},
         }
-    }
-
-    /// TODO FITZGEN
-    pub unsafe fn unchecked_decode_all(visitor: V, mut bytecode: &[u8]) -> V {
-        let mut decoder = Decoder::new(visitor);
-
-        while !bytecode.is_empty() {
-            let is_extended_op = match bytecode.get(0).copied().and_then(Opcode::new) {
-                Some(Opcode::ExtendedOp) => true,
-                _ => false,
-            };
-
-            let start = decoder.position;
-            decoder.unchecked_decode_one(bytecode);
-            let size = decoder.position - start;
-            bytecode = &bytecode[size..];
-
-            if is_extended_op {
-                let start = decoder.position;
-                decoder.unchecked_decode_one_extended(bytecode);
-                let size = decoder.position - start;
-                bytecode = &bytecode[size..];
-            }
-        }
-
-        decoder.into_visitor()
-    }
-
-    /// TODO FITZGEN
-    pub fn into_visitor(self) -> V {
-        self.visitor
     }
 }
 
@@ -379,43 +434,39 @@ macro_rules! define_decoder {
             } )? ;
         )*
     ) => {
-        impl<V> Decoder<V>
-        where
-            V: OpVisitor,
-        {
-            unsafe fn decode_raw<T>(&mut self, mut bytecode: &[u8]) -> Result<V::Return, T::Error>
+        impl Decoder {
+            unsafe fn decode_raw<T, V>(
+                &mut self,
+                bytecode: &mut T::Bytecode<'_>,
+                visitor: &mut V,
+            ) -> Result<V::Return, T::Error>
             where
-                T: DecodeRawMethods
+                T: DecodeRawMethods,
+                V: OpVisitor,
             {
                 let start = self.position;
 
-                let byte = bytecode.get(0).copied().ok_or_else(|| T::unexpected_eof(self.position))?;
-                self.position += 1;
-                bytecode = &bytecode[1..];
-
-                let opcode = Opcode::new(byte).ok_or_else(|| T::invalid_opcode(self.position, byte))?;
+                let byte = T::get1(bytecode, &mut self.position)?;
+                let opcode = Opcode::new(byte).ok_or_else(|| {
+                    T::invalid_opcode(self.position - 1, byte)
+                })?;
 
                 match opcode {
                     $(
                         Opcode::$name => {
                             $(
                                 $(
-                                    let (field_size, $field) = <$field_ty>::decode::<T>(
-                                        self.position,
+                                    let $field = <$field_ty>::decode::<T>(
+                                        &mut self.position,
                                         bytecode,
                                     )?;
-                                    self.position += field_size;
-                                    #[allow(unused_assignments)]
-                                    {
-                                        bytecode = &bytecode[field_size..];
-                                    }
                                 )*
                             )?
 
                             let size = self.position - start;
-                            self.visitor.before_visit(size);
-                            let ret = self.visitor.$snake_name($( $( $field ),* )?);
-                            self.visitor.after_visit(size);
+                            visitor.before_visit(size);
+                            let ret = visitor.$snake_name($( $( $field ),* )?);
+                            visitor.after_visit(size);
                             Ok(ret)
                         }
                     )*
@@ -459,23 +510,19 @@ macro_rules! define_extended_decoder {
             } )? ;
         )*
     ) => {
-        impl<V> Decoder<V>
-        where
-            V: ExtendedOpVisitor,
-        {
-            unsafe fn decode_extended_raw<T>(&mut self, mut bytecode: &[u8]) -> Result<V::Return, T::Error>
+        impl Decoder {
+            unsafe fn decode_extended_raw<T, V>(
+                &mut self,
+                bytecode: &mut T::Bytecode<'_>,
+                visitor: &mut V,
+            ) -> Result<V::Return, T::Error>
             where
-                T: DecodeRawMethods
+                T: DecodeRawMethods,
+                V: ExtendedOpVisitor,
             {
                 let start = self.position;
 
-                let (size, code) = u16::decode::<T>(self.position, bytecode)?;
-                self.position += size;
-                #[allow(unused_assignments)]
-                {
-                    bytecode = &bytecode[size..];
-                }
-
+                let code = u16::decode::<T>(&mut self.position, bytecode)?;
                 let opcode = ExtendedOpcode::new(code).ok_or_else(|| {
                     T::invalid_extended_opcode(self.position, code)
                 })?;
@@ -485,22 +532,17 @@ macro_rules! define_extended_decoder {
                         ExtendedOpcode::$name => {
                             $(
                                 $(
-                                    let (field_size, $field) = <$field_ty>::decode::<T>(
-                                        self.position,
+                                    let $field = <$field_ty>::decode::<T>(
+                                        &mut self.position,
                                         bytecode,
                                     )?;
-                                    self.position += field_size;
-                                    #[allow(unused_assignments)]
-                                    {
-                                        bytecode = &bytecode[size..];
-                                    }
                                 )*
                             )?
 
                             let size = self.position - start;
-                            self.visitor.before_visit(size);
-                            let ret = self.visitor.$snake_name($( $( $field ),* )?);
-                            self.visitor.after_visit(size);
+                            visitor.before_visit(size);
+                            let ret = visitor.$snake_name($( $( $field ),* )?);
+                            visitor.after_visit(size);
                             Ok(ret)
                         }
                     )*
