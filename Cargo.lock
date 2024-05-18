@@ -3428,6 +3428,7 @@ dependencies = [
  "bumpalo",
  "cc",
  "cfg-if",
+ "cranelift-pulley",
  "encoding_rs",
  "fxprof-processed-profile",
  "gimli",

@@ -40,7 +40,7 @@ macro_rules! impl_disas {
             } )? ;
         )*
     ) => {
-        impl<'a> OpVisitor for &'a mut Disassembler<'_> {
+        impl<'a> OpVisitor for Disassembler<'_> {
             type Return = ();
 
             fn before_visit(&mut self, size: usize) {
@@ -96,7 +96,7 @@ macro_rules! impl_extended_disas {
             } )? ;
         )*
     ) => {
-        impl<'a> ExtendedOpVisitor for &'a mut Disassembler<'_> {
+        impl<'a> ExtendedOpVisitor for Disassembler<'_> {
             $(
                 fn $snake_name(&mut self $( $( , $field : $field_ty )* )? ) {
                     let mnemonic = stringify!($snake_name);

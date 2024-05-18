@@ -33,6 +33,7 @@ wasmtime-component-util = { workspace = true, optional = true }
 wasmtime-slab = { workspace = true, optional = true }
 wasmtime-versioned-export-macros = { workspace = true }
 wasmtime-wmemcheck = { workspace = true, optional = true }
+cranelift-pulley = { workspace = true, optional = true }
 target-lexicon = { workspace = true }
 wasmparser = { workspace = true }
 wasm-encoder = { workspace = true, optional = true }
@@ -142,7 +143,7 @@ cranelift = ["dep:wasmtime-cranelift", "std"]
 winch = ["dep:wasmtime-winch", "std"]
 
 # TODO FITZGEN
-pulley = ["wasmtime-cranelift?/pbc64"]
+pulley = ["dep:cranelift-pulley", "wasmtime-cranelift?/pbc64"]
 
 # Enables support for incremental compilation cache to be enabled in `Config`.
 incremental-cache = ["wasmtime-cranelift?/incremental-cache", "std"]
@@ -227,7 +228,8 @@ runtime = [
   "dep:windows-sys",
   "dep:psm",
   "dep:rustix",
-  "rustix/mm"
+  "rustix/mm",
+  "cranelift-pulley?/interp",
 ]
 
 # Enable support for garbage collection-related things.

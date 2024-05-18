@@ -1045,20 +1045,54 @@ impl Func {
         params_and_returns: *mut ValRaw,
         params_and_returns_capacity: usize,
     ) -> Result<()> {
-        invoke_wasm_and_catch_traps(store, |caller| {
-            let func_ref = func_ref.as_ref();
-            match func_ref.payload.unpack() {
-                UnpackedFuncRefPayload::Trampolines(trampolines) => (trampolines.array_call)(
-                    func_ref.vmctx,
-                    caller.cast::<VMOpaqueContext>(),
-                    params_and_returns,
-                    params_and_returns_capacity,
-                ),
-                UnpackedFuncRefPayload::Interpreter(int) => {
-                    todo!("FITZGEN: call into the interpreter!")
-                }
+        let func_ref = func_ref.as_ref();
+        match func_ref.payload.unpack() {
+            UnpackedFuncRefPayload::Trampolines(trampolines) => {
+                invoke_wasm_and_catch_traps(store, |caller| {
+                    (trampolines.array_call)(
+                        func_ref.vmctx,
+                        caller.cast::<VMOpaqueContext>(),
+                        params_and_returns,
+                        params_and_returns_capacity,
+                    )
+                })
             }
-        })
+            UnpackedFuncRefPayload::Interpreter(int) => {
+                // TODO FITZGEN: need to call `invoke_wasm_and_catch_traps`
+                // somehow (can't right now because of borrow conflicts) so that
+                // we `setjmp` for host traps. I think we can just pass the
+                // store through `invoke_wasm_and_catch_traps` -> `catch_traps`
+                // -> the closure?
+                //
+                // TODO FITZGEN: we actually still need trampolines with pulley
+                // to convert from the array call calling convention to its
+                // calling convention, or we need to make it use the array call
+                // calling convention all the time...
+                use cranelift_pulley::interp::{Type, Val, XRegVal};
+                let rets = store
+                    .0
+                    .pulley_vm()
+                    .call(
+                        int.func.cast(),
+                        &[
+                            Val::XReg(XRegVal::new_usize(func_ref.vmctx as usize)),
+                            Val::XReg(
+                                // TODO FITZGEN: need to `invoke_wasm_and_catch_traps`
+                                //
+                                // XRegVal::new_usize(caller.cast::<VMOpaqueContext>() as usize),
+                                XRegVal::new_usize(0),
+                            ),
+                            Val::XReg(XRegVal::new_usize(params_and_returns as usize)),
+                            Val::XReg(XRegVal::new_usize(params_and_returns_capacity)),
+                        ],
+                        [],
+                    )
+                    .unwrap();
+                drop(rets);
+                panic!("FITZGEN: machine state: {:#?}", store.0.pulley_vm().state());
+                // panic!("FITZGEN: got {:?}", rets.collect::<Vec<_>>())
+            }
+        }
     }
 
     /// Converts the raw representation of a `funcref` into an `Option<Func>`

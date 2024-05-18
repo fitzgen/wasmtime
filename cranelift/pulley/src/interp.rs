@@ -1,4 +1,19 @@
 //! Interpretation of pulley bytecode.
+//!
+//! TODO FITZGEN: put this somewhere else, maybe crate top level.
+//!
+//! Principles:
+//!
+//! * Avoid materializing ops, just dispatch directly to the visitor instead.
+//!
+//! * Macro ops for common sequences, especially those we see from Wasmtime and
+//!   Cranelift.
+//!
+//! * Very simple and fast to decode ops, avoid bitpacking unless it really pays
+//!   for itself by lowering cache pressure.
+//!
+//! * Variable-sized operations to keep the most common ops small and allow for
+//!   unbounded numbers of macro ops in the future.
 
 #![allow(warnings)] // TODO FITZGEN
 
@@ -118,6 +133,7 @@ impl Vm {
                     .decoder
                     .unchecked_decode_one_extended(&mut pc, &mut self.state);
             }
+            // Really wish we had `feature(explicit_tail_calls)`...
             match continuation {
                 Continuation::Continue => {
                     self.state.pc = pc;
@@ -163,7 +179,7 @@ impl Vm {
 }
 
 /// TODO FITZGEN
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum Type {
     /// TODO FITZGEN
     XReg,
@@ -174,6 +190,7 @@ pub enum Type {
 }
 
 /// TODO FITZGEN
+#[derive(Clone, Copy, Debug)]
 pub enum Val {
     /// TODO FITZGEN
     XReg(XRegVal),
@@ -186,6 +203,19 @@ pub enum Val {
 /// TODO FITZGEN
 #[derive(Copy, Clone)]
 pub struct XRegVal(XRegUnion);
+
+impl core::fmt::Debug for XRegVal {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("XRegVal")
+            .field("as_i32", &self.get_i32())
+            .field("as_u32", &self.get_u32())
+            .field("as_i64", &self.get_i64())
+            .field("as_u64", &self.get_u64())
+            .field("as_isize", &self.get_isize())
+            .field("as_usize", &self.get_usize())
+            .finish()
+    }
+}
 
 // NB: we always store these in little endian, so we have to `from_le_bytes`
 // whenever we read and `to_le_bytes` whenever we store.
@@ -325,6 +355,15 @@ impl XRegVal {
 #[derive(Copy, Clone)]
 pub struct FRegVal(FRegUnion);
 
+impl core::fmt::Debug for FRegVal {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("FRegVal")
+            .field("as_f32", &self.get_f32())
+            .field("as_f64", &self.get_f64())
+            .finish()
+    }
+}
+
 // NB: we always store these in little endian, so we have to `from_le_bytes`
 // whenever we read and `to_le_bytes` whenever we store.
 #[derive(Copy, Clone)]
@@ -385,8 +424,19 @@ impl FRegVal {
 #[derive(Copy, Clone)]
 pub struct VRegVal(VRegUnion);
 
+impl core::fmt::Debug for VRegVal {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("VRegVal")
+            .field("as_i128", &unsafe { self.0.i128 })
+            .field("as_u128", &unsafe { self.0.u128 })
+            .finish()
+    }
+}
+
 #[derive(Copy, Clone)]
 union VRegUnion {
+    // TODO FITZGEN: need to figure out how we are going to handle portability
+    // of lane ordering on top of each lane's endianness.
     i128: i128,
     u128: u128,
 }
@@ -404,6 +454,27 @@ pub struct MachineState {
     f_regs: [FRegVal; FReg::RANGE.end as usize],
     v_regs: [VRegVal; VReg::RANGE.end as usize],
     stack: Vec<u8>,
+}
+
+unsafe impl Send for MachineState {}
+unsafe impl Sync for MachineState {}
+
+impl core::fmt::Debug for MachineState {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let MachineState {
+            pc,
+            x_regs,
+            f_regs,
+            v_regs,
+            stack: _,
+        } = self;
+        f.debug_struct("MachineState")
+            .field("pc", pc)
+            .field("x_regs", x_regs)
+            .field("f_regs", f_regs)
+            .field("v_regs", v_regs)
+            .finish_non_exhaustive()
+    }
 }
 
 impl MachineState {
@@ -601,7 +672,11 @@ impl OpVisitor for MachineState {
         todo!()
     }
     fn load64(&mut self, dst: XReg, ptr: XReg) -> Self::Return {
-        todo!()
+        let ptr = self.x(ptr).get_usize();
+        let ptr = ptr as *mut u64;
+        let val = unsafe { ptr::read(ptr) };
+        self.x_mut(dst).set_u64(val);
+        Continuation::Continue
     }
 
     fn load32_u_offset8(&mut self, dst: XReg, ptr: XReg, offset: i8) -> Self::Return {
@@ -611,7 +686,13 @@ impl OpVisitor for MachineState {
         todo!()
     }
     fn load64_offset8(&mut self, dst: XReg, ptr: XReg, offset: i8) -> Self::Return {
-        todo!()
+        let ptr = self.x(ptr).get_usize();
+        let offset = isize::from(offset);
+        let ptr = ptr.wrapping_add(offset as usize);
+        let ptr = ptr as *mut u64;
+        let val = unsafe { ptr::read(ptr) };
+        self.x_mut(dst).set_u64(val);
+        Continuation::Continue
     }
 
     fn load32_u_offset16(&mut self, dst: XReg, ptr: XReg, offset: i16) -> Self::Return {
@@ -648,14 +729,28 @@ impl OpVisitor for MachineState {
         todo!()
     }
     fn store64(&mut self, ptr: XReg, src: XReg) -> Self::Return {
-        todo!()
+        let ptr = self.x(ptr).get_usize();
+        let ptr = ptr as *mut u64;
+        let val = self.x(src).get_u64();
+        unsafe {
+            ptr::write(ptr, val);
+        }
+        Continuation::Continue
     }
 
     fn store32_offset8(&mut self, ptr: XReg, offset: i8, src: XReg) -> Self::Return {
         todo!()
     }
     fn store64_offset8(&mut self, ptr: XReg, offset: i8, src: XReg) -> Self::Return {
-        todo!()
+        let ptr = self.x(ptr).get_usize();
+        let offset = isize::from(offset);
+        let ptr = ptr.wrapping_add(offset as usize);
+        let ptr = ptr as *mut u64;
+        let val = self.x(src).get_u64();
+        unsafe {
+            ptr::write(ptr, val);
+        }
+        Continuation::Continue
     }
 
     fn store32_offset16(&mut self, ptr: XReg, offset: i16, src: XReg) -> Self::Return {
