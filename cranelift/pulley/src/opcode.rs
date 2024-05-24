@@ -20,11 +20,13 @@ macro_rules! define_opcode {
                 $( #[$attr] )*
                 $name,
             )*
+            /// TODO FITZGEN
+            ExtendedOp,
         }
 
         impl Opcode {
             /// TODO FITZGEN
-            pub const MAX: u8 = define_opcode!( @max $( $name )* );
+            pub const MAX: u8 = define_opcode!( @max $( $name )* ) + 1;
         }
     };
 

@@ -123,7 +123,7 @@ impl TargetIsa for Pbc64Backend {
         }
 
         let mut disas = cranelift_pulley::disas::Disassembler::new(&buffer.data);
-        cranelift_pulley::decode::Decoder::decode_all(&buffer.data, &mut disas);
+        cranelift_pulley::decode::Decoder::decode_all(&mut disas);
         log::debug!("FITZGEN: pulley disassembly:\n{}", disas.disas());
 
         Ok(CompiledCodeStencil {

@@ -150,7 +150,7 @@ impl CodeMemory {
         };
 
         let mut disas = cranelift_pulley::disas::Disassembler::new(ret.text());
-        let _ = cranelift_pulley::decode::Decoder::decode_all(ret.text(), &mut disas);
+        let _ = cranelift_pulley::decode::Decoder::decode_all(&mut disas);
         log::debug!("FITZGEN: CodeMemory::new() disassembly:\n{}", disas.disas());
 
         Ok(ret)

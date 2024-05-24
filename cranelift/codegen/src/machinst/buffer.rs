@@ -1542,7 +1542,7 @@ impl<I: VCodeInst> MachBuffer<I> {
         srclocs.sort_by_key(|entry| entry.start);
 
         let mut disas = cranelift_pulley::disas::Disassembler::new(&self.data);
-        let _ = cranelift_pulley::decode::Decoder::decode_all(&self.data, &mut disas);
+        let _ = cranelift_pulley::decode::Decoder::decode_all(&mut disas);
         log::debug!(
             "FITZGEN: MachBuffer::finish disassembly:\n{}",
             disas.disas()

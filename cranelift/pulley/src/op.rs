@@ -20,40 +20,23 @@ macro_rules! define_op {
                 $( #[$attr] )*
                 $name($name),
             )*
+            /// TODO FITZGEN
+            ExtendedOp(ExtendedOp),
         }
 
         $(
-            define_op! {
-                @op_type
-                $( #[$attr] )*
-                $snake_name = $name $( { $( $field : $field_ty ),* } )? ;
-            }
+            $( #[$attr] )*
+            #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+            #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+            pub struct $name { $(
+                $(
+                    // TODO: add doc comments to all fields and update all
+                    // the macros to match them.
+                    #[allow(missing_docs)]
+                    pub $field : $field_ty,
+                )*
+            )? }
         )*
-    };
-
-    // Intercept the definition of `ExtendedOp`; its type already gets defined
-    // by `define_extended_op!`.
-    (
-        @op_type
-        $( #[$attr:meta] )*
-        extended_op = ExtendedOp;
-    ) => {};
-    (
-        @op_type
-        $( #[$attr:meta] )*
-        $snake_name:ident = $name:ident $( { $( $field:ident : $field_ty:ty ),* } )? ;
-    ) => {
-        $( #[$attr] )*
-        #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-        #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-        pub struct $name { $(
-            $(
-                // TODO: add doc comments to all fields and update all
-                // the macros to match them.
-                #[allow(missing_docs)]
-                pub $field : $field_ty,
-            )*
-        )? }
     };
 }
 for_each_op!(define_op);
@@ -83,30 +66,18 @@ macro_rules! define_extended_op {
         }
 
         $(
-            define_op! {
-                @op_type
-                $( #[$attr] )*
-                $snake_name = $name $( { $( $field : $field_ty ),* } )? ;
-            }
+            $( #[$attr] )*
+            #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+            #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+            pub struct $name { $(
+                $(
+                    // TODO: add doc comments to all fields and update all
+                    // the macros to match them.
+                    #[allow(missing_docs)]
+                    pub $field : $field_ty,
+                )*
+            )? }
         )*
-    };
-
-    (
-        @op_type
-        $( #[$attr:meta] )*
-        $snake_name:ident = $name:ident $( { $( $field:ident : $field_ty:ty ),* } )? ;
-    ) => {
-        $( #[$attr] )*
-        #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-        #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-        pub struct $name { $(
-            $(
-                // TODO: add doc comments to all fields and update all
-                // the macros to match them.
-                #[allow(missing_docs)]
-                pub $field : $field_ty,
-            )*
-        )? }
     };
 }
 for_each_extended_op!(define_extended_op);
@@ -129,39 +100,23 @@ macro_rules! define_op_encode {
                     $(
                         Self::$name(op) => op.encode(into),
                     )*
+                    Self::ExtendedOp(op) => op.encode(into),
                 }
             }
         }
 
         $(
-            define_op_encode! {
-                @op_ty_encode
-                $snake_name = $name $( { $( $field : $field_ty ),* } )? ;
+            impl $name {
+                /// TODO FITZGEN
+                #[cfg(feature = "encode")]
+                pub fn encode<E>(&self, into: &mut E)
+                where
+                    E: Extend<u8>,
+                {
+                    crate::encode::$snake_name(into $( $( , self.$field )* )?);
+                }
             }
         )*
-    };
-    // Intercept `extended_op` and let `define_extended_op_encode!` handle this
-    // case.
-    (
-        @op_ty_encode
-        $( #[$attr:meta] )*
-        extended_op = ExtendedOp;
-    ) => {};
-    (
-        @op_ty_encode
-            $( #[$attr:meta] )*
-            $snake_name:ident = $name:ident $( { $( $field:ident : $field_ty:ty ),* } )? ;
-    ) => {
-        impl $name {
-            /// TODO FITZGEN
-            #[cfg(feature = "encode")]
-            pub fn encode<E>(&self, into: &mut E)
-            where
-                E: Extend<u8>,
-            {
-                crate::encode::$snake_name(into $( $( , self.$field )* )?);
-            }
-        }
     };
 }
 for_each_op!(define_op_encode);
@@ -207,7 +162,17 @@ for_each_extended_op!(define_extended_op_encode);
 /// TODO FITZGEN
 #[cfg(feature = "decode")]
 #[derive(Default)]
-pub struct MaterializeOpsVisitor;
+pub struct MaterializeOpsVisitor<B> {
+    bytecode: B,
+}
+
+#[cfg(feature = "decode")]
+impl<B> MaterializeOpsVisitor<B> {
+    /// TODO FITZGEN
+    pub fn new(bytecode: B) -> Self {
+        Self { bytecode }
+    }
+}
 
 macro_rules! define_materialize_op_visitor {
     (
@@ -217,37 +182,23 @@ macro_rules! define_materialize_op_visitor {
         )*
     ) => {
         #[cfg(feature = "decode")]
-        impl crate::decode::OpVisitor for MaterializeOpsVisitor {
-            type Return = Option<crate::op::Op>;
+        impl<B: crate::decode::Bytecode> crate::decode::OpVisitor for MaterializeOpsVisitor<B> {
+            type Bytecode = B;
+
+            fn bytecode(&mut self) -> &mut Self::Bytecode {
+                &mut self.bytecode
+            }
+
+            type Return = crate::op::Op;
 
             $(
-                define_materialize_op_visitor! {
-                    @func
-                    $snake_name = $name $( { $( $field : $field_ty ),* } )? ;
+                $( #[$attr] )*
+                fn $snake_name(&mut self $( $( , $field : $field_ty )* )? ) -> Self::Return {
+                    crate::op::Op::$name(crate::op::$name { $( $(
+                        $field,
+                    )* )? })
                 }
             )*
-        }
-    };
-    // Intercept `extended_op` and let the `ExtendedOpVisitor` take care of
-    // materializing the extended op.
-    (
-        @func
-        $( #[$attr:meta] )*
-        extended_op = ExtendedOp;
-    ) => {
-        $( #[$attr] )*
-        fn extended_op(&mut self) -> Self::Return { None }
-    };
-    (
-        @func
-        $( #[$attr:meta] )*
-        $snake_name:ident = $name:ident $( { $( $field:ident : $field_ty:ty ),* } )? ;
-    ) => {
-        $( #[$attr] )*
-        fn $snake_name(&mut self $( $( , $field : $field_ty )* )? ) -> Self::Return {
-            Some(crate::op::Op::$name(crate::op::$name { $( $(
-                $field,
-            )* )? }))
         }
     };
 }
@@ -261,13 +212,13 @@ macro_rules! define_materialize_extended_op_visitor {
         )*
     ) => {
         #[cfg(feature = "decode")]
-        impl crate::decode::ExtendedOpVisitor for MaterializeOpsVisitor {
+        impl<B: crate::decode::Bytecode> crate::decode::ExtendedOpVisitor for MaterializeOpsVisitor<B> {
             $(
                 $( #[$attr] )*
                 fn $snake_name(&mut self $( $( , $field : $field_ty )* )? ) -> Self::Return {
-                    Some(crate::op::ExtendedOp::$name(crate::op::$name { $( $(
+                    crate::op::ExtendedOp::$name(crate::op::$name { $( $(
                         $field,
-                    )* )? }).into())
+                    )* )? }).into()
                 }
             )*
         }

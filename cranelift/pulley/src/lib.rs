@@ -143,9 +143,6 @@ macro_rules! for_each_op {
             bitcast_float_from_int_32 = BitcastFloatFromInt32 { dst: FReg, src: XReg };
             /// TODO FITZGEN
             bitcast_float_from_int_64 = BitcastFloatFromInt64 { dst: FReg, src: XReg };
-
-            /// TODO FITZGEN
-            extended_op = ExtendedOp;
         }
     };
 }

@@ -8,19 +8,22 @@ use core::fmt::Write;
 
 /// TODO FITZGEN
 pub struct Disassembler<'a> {
-    // TODO FITZGEN: this field no longer used
-    bytecode: &'a [u8],
-    position: usize,
+    raw_bytecode: &'a [u8],
+    bytecode: SafeBytecode<'a>,
     disas: String,
+    start: usize,
+    temp: String,
 }
 
 impl<'a> Disassembler<'a> {
     /// TODO FITZGEN
     pub fn new(bytecode: &'a [u8]) -> Self {
         Self {
-            bytecode,
-            position: 0,
+            raw_bytecode: bytecode,
+            bytecode: SafeBytecode::new(bytecode),
             disas: String::new(),
+            start: 0,
+            temp: String::new(),
         }
     }
 
@@ -120,39 +123,51 @@ macro_rules! impl_disas {
             } )? ;
         )*
     ) => {
-        impl<'a> OpVisitor for Disassembler<'_> {
+        impl<'a> OpVisitor for Disassembler<'a> {
+            type Bytecode = SafeBytecode<'a>;
+
+            fn bytecode(&mut self) -> &mut Self::Bytecode {
+                &mut self.bytecode
+            }
+
             type Return = ();
 
-            fn before_visit(&mut self, size: usize) {
-                write!(&mut self.disas, "{:8x}: ", self.position).unwrap();
+            fn before_visit(&mut self) {
+                self.start = self.bytecode.position();
+            }
+
+            fn after_visit(&mut self) {
+                let size = self.bytecode.position() - self.start;
+
+                write!(&mut self.disas, "{:8x}: ", self.start).unwrap();
                 let mut need_space = false;
-                for byte in &self.bytecode[self.position..][..size] {
+                for byte in &self.raw_bytecode[self.start..][..size] {
                     write!(&mut self.disas, "{}{byte:02x}", if need_space { " " } else { "" }).unwrap();
                     need_space = true;
                 }
                 for _ in 0..11_usize.saturating_sub(size) {
                     write!(&mut self.disas, "   ").unwrap();
                 }
-            }
 
-            fn after_visit(&mut self, size: usize) {
+                self.disas.push_str(&self.temp);
+                self.temp.clear();
+
                 self.disas.push('\n');
-                self.position += size;
             }
 
             $(
                 fn $snake_name(&mut self $( $( , $field : $field_ty )* )? ) {
                     let mnemonic = stringify!($snake_name);
-                    write!(&mut self.disas, "{mnemonic}").unwrap();
+                    write!(&mut self.temp, "{mnemonic}").unwrap();
                     $(
                         let mut need_comma = false;
                         $(
                             let val = $field;
                             if need_comma {
-                                write!(&mut self.disas, ",").unwrap();
+                                write!(&mut self.temp, ",").unwrap();
                             }
-                            write!(&mut self.disas, " ").unwrap();
-                            val.disas(self.position, &mut self.disas);
+                            write!(&mut self.temp, " ").unwrap();
+                            val.disas(self.start, &mut self.temp);
                             #[allow(unused_assignments)]
                             { need_comma = true; }
                         )*
@@ -180,16 +195,16 @@ macro_rules! impl_extended_disas {
             $(
                 fn $snake_name(&mut self $( $( , $field : $field_ty )* )? ) {
                     let mnemonic = stringify!($snake_name);
-                    write!(&mut self.disas, "\t{mnemonic}").unwrap();
+                    write!(&mut self.temp, "{mnemonic}").unwrap();
                     $(
                         let mut need_comma = false;
                         $(
                             let val = $field;
                             if need_comma {
-                                write!(&mut self.disas, ",").unwrap();
+                                write!(&mut self.temp, ",").unwrap();
                             }
-                            write!(&mut self.disas, " ").unwrap();
-                            val.disas(self.position, &mut self.disas);
+                            write!(&mut self.temp, " ").unwrap();
+                            val.disas(self.start, &mut self.temp);
                             #[allow(unused_assignments)]
                             { need_comma = true; }
                         )*

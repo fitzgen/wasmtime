@@ -15,7 +15,7 @@
       (emit_side_effect (pbc_jump label)))
 
 ;; Conditional branches.
-(rule (lower_branch (brif c _ _) (two_targets then else))
+(rule (lower_branch (brif (maybe_uextend c) _ _) (two_targets then else))
       (emit_side_effect (pbc_br_if c then else)))
 
 ;; Branch tables.
@@ -77,8 +77,10 @@
 
 ;;;; Rules for `icmp` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(rule (lower (icmp cc a b @ (has_type ty _)))
-      (lower_icmp ty cc a b))
+(rule 1 (lower (icmp cc a b @ (value_type $I64)))
+      (lower_icmp $I64 cc a b))
+(rule (lower (icmp cc a b @ (value_type (fits_in_32 _))))
+      (lower_icmp $I32 cc a b))
 
 (decl lower_icmp (Type IntCC Value Value) XReg)
 
@@ -128,8 +130,6 @@
       (lower_icmp ty (IntCC.UnsignedLessThan) b a))
 (rule (lower_icmp ty (IntCC.UnsignedGreaterThanOrEqual) a b)
       (lower_icmp ty (IntCC.UnsignedLessThanOrEqual) b a))
-
-;; x >= 2 ==> x > 3 ==> 3 < x ==> 2 <= x
 
 ;;;; Rules for `load` ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
