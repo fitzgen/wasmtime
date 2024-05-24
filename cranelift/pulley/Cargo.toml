@@ -24,4 +24,11 @@ arbitrary = ["dep:arbitrary", "arbitrary/derive", "std"]
 encode = []
 decode = []
 disas = ["decode"]
-interp = ["decode"]
+interp = [
+  "decode",
+  # TODO FITZGEN remove after done debugging
+  "std",
+]
+
+[package.metadata.docs.rs]
+features = ["encode", "decode", "disas", "interp"]

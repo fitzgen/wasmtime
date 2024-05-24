@@ -1109,7 +1109,6 @@ impl crate::runtime::vm::ModuleRuntimeInfo for ModuleInner {
     }
 
     fn array_to_wasm_trampoline(&self, index: DefinedFuncIndex) -> Option<VMArrayCallFunction> {
-        debug_assert!(!self.module.is_pulley());
         let ptr = self.module.array_to_wasm_trampoline(index)?.as_ptr();
         Some(unsafe { mem::transmute::<*const u8, VMArrayCallFunction>(ptr) })
     }

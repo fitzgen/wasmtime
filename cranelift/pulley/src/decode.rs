@@ -1,5 +1,6 @@
 //! Decoding support for pulley bytecode.
 
+use crate::imms::*;
 use crate::opcode::*;
 use crate::regs::*;
 
@@ -327,6 +328,15 @@ impl Decode for VReg {
     }
 }
 
+impl Decode for PcRelOffset {
+    fn decode<T>(position: &mut usize, bytecode: &mut T::Bytecode<'_>) -> Result<Self, T::Error>
+    where
+        T: DecodeRawMethods,
+    {
+        i32::decode::<T>(position, bytecode).map(|x| Self::from(x))
+    }
+}
+
 /// TODO FITZGEN
 pub struct Decoder {
     position: usize,
@@ -422,6 +432,20 @@ impl Decoder {
     }
 }
 
+/// An `OpVisitor` combinator to sequence one visitor and then another.
+pub struct SequencedVisitor<'a, F, V1, V2> {
+    join: F,
+    v1: &'a mut V1,
+    v2: &'a mut V2,
+}
+
+impl<'a, F, V1, V2> SequencedVisitor<'a, F, V1, V2> {
+    /// Create a new sequenced visitor.
+    pub fn new(join: F, v1: &'a mut V1, v2: &'a mut V2) -> Self {
+        SequencedVisitor { join, v1, v2 }
+    }
+}
+
 macro_rules! define_decoder {
     (
         $(
@@ -494,6 +518,34 @@ macro_rules! define_decoder {
                 fn $snake_name(&mut self $( $( , $field : $field_ty )* )? ) -> Self::Return;
             )*
         }
+
+        impl<F, T, V1, V2> OpVisitor for SequencedVisitor<'_, F, V1, V2>
+        where
+            F: FnMut(V1::Return, V2::Return) -> T,
+            V1: OpVisitor,
+            V2: OpVisitor,
+        {
+            type Return = T;
+
+            fn before_visit(&mut self, size: usize) {
+                self.v1.before_visit(size);
+                self.v2.before_visit(size);
+            }
+
+            fn after_visit(&mut self, size: usize) {
+                self.v1.before_visit(size);
+                self.v2.before_visit(size);
+            }
+
+            $(
+                $( #[$attr] )*
+                fn $snake_name(&mut self $( $( , $field : $field_ty )* )? ) -> Self::Return {
+                    let a = self.v1.$snake_name( $( $( $field , )* )? );
+                    let b = self.v2.$snake_name( $( $( $field , )* )? );
+                    (self.join)(a, b)
+                }
+            )*
+        }
     };
 }
 for_each_op!(define_decoder);
@@ -555,6 +607,22 @@ macro_rules! define_extended_decoder {
             $(
                 $( #[$attr] )*
                 fn $snake_name(&mut self $( $( , $field : $field_ty )* )? ) -> Self::Return;
+            )*
+        }
+
+        impl<F, T, V1, V2> ExtendedOpVisitor for SequencedVisitor<'_, F, V1, V2>
+        where
+            F: FnMut(V1::Return, V2::Return) -> T,
+            V1: ExtendedOpVisitor,
+            V2: ExtendedOpVisitor,
+        {
+            $(
+                $( #[$attr] )*
+                fn $snake_name(&mut self $( $( , $field : $field_ty )* )? ) -> Self::Return {
+                    let a = self.v1.$snake_name( $( $( $field , )* )? );
+                    let b = self.v2.$snake_name( $( $( $field , )* )? );
+                    (self.join)(a, b)
+                }
             )*
         }
     };

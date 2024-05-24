@@ -2,10 +2,10 @@
 
 use crate::binemit::{Addend, CodeOffset, Reloc};
 use crate::ir::types::{self, F32, F64, I128, I16, I32, I64, I8, I8X16, R32, R64};
-use crate::ir::{ExternalName, MemFlags, Opcode, Type};
+use crate::ir::{self, ExternalName, MemFlags, Opcode, Type};
 use crate::isa::pbc64::abi::Pbc64MachineDeps;
 use crate::isa::{CallConv, FunctionAlignment};
-use crate::machinst::*;
+use crate::{machinst::*, trace};
 use crate::{settings, CodegenError, CodegenResult};
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
@@ -32,20 +32,25 @@ pub(crate) type VecU8 = Vec<u8>;
 
 pub use crate::isa::pbc64::lower::isle::generated_code::MInst as Inst;
 
-/// Additional information for (direct) Call instructions, left out of line to
-/// lower the size of the Inst enum.
+/// Additional information for direct and indirect call instructions.
+///
+/// Left out of line to lower the size of the `Inst` enum.
 #[derive(Clone, Debug)]
-pub struct CallInfo {}
+pub struct CallInfo {
+    pub uses: CallArgList,
+    pub defs: CallRetList,
+    pub opcode: Opcode,
+    pub clobbers: PRegSet,
+    pub callee_pop_size: u32,
+}
 
-/// Additional information for CallInd instructions, left out of line to lower
-/// the size of the Inst enum.
+/// Similar to `CallInfo` but for return calls.
 #[derive(Clone, Debug)]
-pub struct CallIndInfo {}
-
-/// Additional information for `return_call[_ind]` instructions, left out of
-/// line to lower the size of the `Inst` enum.
-#[derive(Clone, Debug)]
-pub struct ReturnCallInfo {}
+pub struct ReturnCallInfo {
+    pub uses: CallArgList,
+    pub opcode: Opcode,
+    pub new_stack_arg_size: u32,
+}
 
 /// A conditional branch target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -127,13 +132,45 @@ fn pbc64_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
                 collector.reg_fixed_use(vreg, *preg);
             }
         }
-        Inst::Unwind { .. } => {}
+        Inst::Ret => {
+            unreachable!("`ret` is only added after regalloc")
+        }
 
-        Inst::Trap { .. } => {}
+        Inst::Unwind { .. } | Inst::Trap { .. } | Inst::Nop => {}
 
-        Inst::Nop => todo!(),
+        Inst::GetSp { dst } => {
+            collector.reg_def(dst);
+        }
 
-        Inst::Ret => todo!(),
+        Inst::LoadExtName {
+            dst,
+            name: _,
+            offset: _,
+        } => {
+            collector.reg_def(dst);
+        }
+
+        Inst::Call { callee: _, info } => {
+            let CallInfo { uses, defs, .. } = &mut **info;
+            for CallArgPair { vreg, preg } in uses {
+                collector.reg_fixed_use(vreg, *preg);
+            }
+            for CallRetPair { vreg, preg } in defs {
+                collector.reg_fixed_def(vreg, *preg);
+            }
+            collector.reg_clobbers(info.clobbers);
+        }
+        Inst::IndirectCall { callee, info } => {
+            collector.reg_use(callee);
+            let CallInfo { uses, defs, .. } = &mut **info;
+            for CallArgPair { vreg, preg } in uses {
+                collector.reg_fixed_use(vreg, *preg);
+            }
+            for CallRetPair { vreg, preg } in defs {
+                collector.reg_fixed_def(vreg, *preg);
+            }
+            collector.reg_clobbers(info.clobbers);
+        }
 
         Inst::Jump { .. } => {}
 
@@ -149,17 +186,31 @@ fn pbc64_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
         Inst::Fmov { dst, src } => todo!(),
         Inst::Vmov { dst, src } => todo!(),
 
-        Inst::Xconst8 { dst, imm } => todo!(),
-        Inst::Xconst16 { dst, imm } => todo!(),
-        Inst::Xconst32 { dst, imm } => todo!(),
-        Inst::Xconst64 { dst, imm } => todo!(),
+        Inst::Xconst8 { dst, imm: _ }
+        | Inst::Xconst16 { dst, imm: _ }
+        | Inst::Xconst32 { dst, imm: _ }
+        | Inst::Xconst64 { dst, imm: _ } => {
+            collector.reg_def(dst);
+        }
 
-        Inst::Xadd32 { dst, src1, src2 } => {
+        Inst::Xadd32 { dst, src1, src2 }
+        | Inst::Xadd64 { dst, src1, src2 }
+        | Inst::Xeq64 { dst, src1, src2 }
+        | Inst::Xneq64 { dst, src1, src2 }
+        | Inst::Xslt64 { dst, src1, src2 }
+        | Inst::Xslteq64 { dst, src1, src2 }
+        | Inst::Xult64 { dst, src1, src2 }
+        | Inst::Xulteq64 { dst, src1, src2 }
+        | Inst::Xeq32 { dst, src1, src2 }
+        | Inst::Xneq32 { dst, src1, src2 }
+        | Inst::Xslt32 { dst, src1, src2 }
+        | Inst::Xslteq32 { dst, src1, src2 }
+        | Inst::Xult32 { dst, src1, src2 }
+        | Inst::Xulteq32 { dst, src1, src2 } => {
             collector.reg_use(src1);
             collector.reg_use(src2);
             collector.reg_def(dst);
         }
-        Inst::Xadd64 { .. } => todo!(),
 
         Inst::Load {
             dst,
@@ -247,6 +298,7 @@ impl MachInst for Inst {
         match self {
             Inst::Ret { .. } | Inst::Rets { .. } => MachTerminator::Ret,
             Inst::Jump { .. } => MachTerminator::Uncond,
+            Inst::BrIf { .. } => MachTerminator::Cond,
             _ => MachTerminator::None,
         }
     }
@@ -256,7 +308,21 @@ impl MachInst for Inst {
     }
 
     fn gen_move(to_reg: Writable<Reg>, from_reg: Reg, ty: Type) -> Inst {
-        todo!()
+        match ty {
+            ir::types::I8 | ir::types::I16 | ir::types::I32 | ir::types::I64 => Inst::Xmov {
+                dst: WritableXReg::try_from(to_reg).unwrap(),
+                src: XReg::new(from_reg).unwrap(),
+            },
+            ir::types::F32 | ir::types::F64 => Inst::Fmov {
+                dst: WritableFReg::try_from(to_reg).unwrap(),
+                src: FReg::new(from_reg).unwrap(),
+            },
+            _ if ty.is_vector() => Inst::Vmov {
+                dst: WritableVReg::try_from(to_reg).unwrap(),
+                src: VReg::new(from_reg).unwrap(),
+            },
+            _ => panic!("don't know how to generate a move for type {ty}"),
+        }
     }
 
     fn gen_nop(preferred_size: usize) -> Inst {
@@ -305,8 +371,17 @@ impl MachInst for Inst {
     }
 
     fn worst_case_size() -> CodeOffset {
-        // xconst64 = 1 byte opcode + 1 byte destination reg + 8 byte immediate
-        10
+        // `BrIf { c, taken, not_taken }` expands to `br_if c, taken; jump not_taken`.
+        //
+        // The first instruction is six bytes long:
+        //   * 1 byte opcode
+        //   * 1 byte `c` register encoding
+        //   * 4 byte `taken` displacement
+        //
+        // And the second instruction is five bytes long:
+        //   * 1 byte opcode
+        //   * 4 byte `not_taken` displacement
+        11
     }
 
     fn ref_type_regclass(_settings: &settings::Flags) -> RegClass {
@@ -422,9 +497,28 @@ impl Inst {
 
             Inst::Trap { code } => format!("trap // code = {code:?}"),
 
-            Inst::Nop => todo!(),
+            Inst::Nop => format!("nop"),
 
-            Inst::Ret => todo!(),
+            Inst::Ret => format!("ret"),
+
+            Inst::GetSp { dst } => {
+                let dst = format_reg(*dst.to_reg(), allocs);
+                format!("{dst} = get_sp")
+            }
+
+            Inst::LoadExtName { dst, name, offset } => {
+                let dst = format_reg(*dst.to_reg(), allocs);
+                format!("{dst} = load_ext_name {name:?}, {offset}")
+            }
+
+            Inst::Call { callee, info } => {
+                format!("call {callee:?}, {info:?}")
+            }
+
+            Inst::IndirectCall { callee, info } => {
+                let callee = format_reg(**callee, allocs);
+                format!("indirect_call {callee}, {info:?}")
+            }
 
             Inst::Jump { label } => format!("jump {}", label.to_string()),
 
@@ -443,18 +537,103 @@ impl Inst {
             Inst::Fmov { dst, src } => todo!(),
             Inst::Vmov { dst, src } => todo!(),
 
-            Inst::Xconst8 { dst, imm } => todo!(),
-            Inst::Xconst16 { dst, imm } => todo!(),
-            Inst::Xconst32 { dst, imm } => todo!(),
-            Inst::Xconst64 { dst, imm } => todo!(),
+            Inst::Xconst8 { dst, imm } => {
+                let dst = format_reg(*dst.to_reg(), allocs);
+                format!("{dst} = xconst8 {imm}")
+            }
+            Inst::Xconst16 { dst, imm } => {
+                let dst = format_reg(*dst.to_reg(), allocs);
+                format!("{dst} = xconst16 {imm}")
+            }
+            Inst::Xconst32 { dst, imm } => {
+                let dst = format_reg(*dst.to_reg(), allocs);
+                format!("{dst} = xconst32 {imm}")
+            }
+            Inst::Xconst64 { dst, imm } => {
+                let dst = format_reg(*dst.to_reg(), allocs);
+                format!("{dst} = xconst64 {imm}")
+            }
 
             Inst::Xadd32 { dst, src1, src2 } => format!(
                 "{} = xadd32 {}, {}",
-                format_reg(*dst.to_reg(), &mut empty_allocs),
-                format_reg(**src1, &mut empty_allocs),
-                format_reg(**src2, &mut empty_allocs)
+                format_reg(*dst.to_reg(), allocs),
+                format_reg(**src1, allocs),
+                format_reg(**src2, allocs)
             ),
             Inst::Xadd64 { .. } => todo!(),
+
+            Inst::Xeq64 { dst, src1, src2 } => format!(
+                "{} = xeq64 {}, {}",
+                format_reg(*dst.to_reg(), allocs),
+                format_reg(**src1, allocs),
+                format_reg(**src2, allocs)
+            ),
+            Inst::Xneq64 { dst, src1, src2 } => format!(
+                "{} = xneq64 {}, {}",
+                format_reg(*dst.to_reg(), allocs),
+                format_reg(**src1, allocs),
+                format_reg(**src2, allocs)
+            ),
+            Inst::Xslt64 { dst, src1, src2 } => format!(
+                "{} = xslt64 {}, {}",
+                format_reg(*dst.to_reg(), allocs),
+                format_reg(**src1, allocs),
+                format_reg(**src2, allocs)
+            ),
+            Inst::Xslteq64 { dst, src1, src2 } => format!(
+                "{} = xslteq64 {}, {}",
+                format_reg(*dst.to_reg(), allocs),
+                format_reg(**src1, allocs),
+                format_reg(**src2, allocs)
+            ),
+            Inst::Xult64 { dst, src1, src2 } => format!(
+                "{} = xult64 {}, {}",
+                format_reg(*dst.to_reg(), allocs),
+                format_reg(**src1, allocs),
+                format_reg(**src2, allocs)
+            ),
+            Inst::Xulteq64 { dst, src1, src2 } => format!(
+                "{} = xulteq64 {}, {}",
+                format_reg(*dst.to_reg(), allocs),
+                format_reg(**src1, allocs),
+                format_reg(**src2, allocs)
+            ),
+            Inst::Xeq32 { dst, src1, src2 } => format!(
+                "{} = xeq32 {}, {}",
+                format_reg(*dst.to_reg(), allocs),
+                format_reg(**src1, allocs),
+                format_reg(**src2, allocs)
+            ),
+            Inst::Xneq32 { dst, src1, src2 } => format!(
+                "{} = xneq32 {}, {}",
+                format_reg(*dst.to_reg(), allocs),
+                format_reg(**src1, allocs),
+                format_reg(**src2, allocs)
+            ),
+            Inst::Xslt32 { dst, src1, src2 } => format!(
+                "{} = xslt32 {}, {}",
+                format_reg(*dst.to_reg(), allocs),
+                format_reg(**src1, allocs),
+                format_reg(**src2, allocs)
+            ),
+            Inst::Xslteq32 { dst, src1, src2 } => format!(
+                "{} = xslteq32 {}, {}",
+                format_reg(*dst.to_reg(), allocs),
+                format_reg(**src1, allocs),
+                format_reg(**src2, allocs)
+            ),
+            Inst::Xult32 { dst, src1, src2 } => format!(
+                "{} = xult32 {}, {}",
+                format_reg(*dst.to_reg(), allocs),
+                format_reg(**src1, allocs),
+                format_reg(**src2, allocs)
+            ),
+            Inst::Xulteq32 { dst, src1, src2 } => format!(
+                "{} = xulteq32 {}, {}",
+                format_reg(*dst.to_reg(), allocs),
+                format_reg(**src1, allocs),
+                format_reg(**src2, allocs)
+            ),
 
             Inst::Load {
                 dst,
@@ -467,7 +646,7 @@ impl Inst {
                 let ty = ty.bits();
                 let ext = format_ext(*ext);
                 let mem = mem.to_string();
-                format!("{dst} = load{ty}{ext} {mem} // flags = {flags}")
+                format!("{dst} = load{ty}{ext} {mem} // flags ={flags}")
             }
 
             Inst::Store {
@@ -493,8 +672,10 @@ impl Inst {
 /// Different forms of label references for different instruction formats.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LabelUse {
-    /// A PC-relative `jump` instruction with an `i32` relative target.
-    Jump,
+    /// A PC-relative `jump`/`call`/etc... instruction with an `i32` relative
+    /// target. The payload value is an addend that describes the positive
+    /// offset from the start of the instruction to the offset being relocated.
+    Jump(u32),
 }
 
 impl MachInstLabelUse for LabelUse {
@@ -505,34 +686,37 @@ impl MachInstLabelUse for LabelUse {
     /// Maximum PC-relative range (positive), inclusive.
     fn max_pos_range(self) -> CodeOffset {
         match self {
-            Self::Jump => 0x7fff_ffff,
+            Self::Jump(_) => 0x7fff_ffff,
         }
     }
 
     /// Maximum PC-relative range (negative).
     fn max_neg_range(self) -> CodeOffset {
         match self {
-            Self::Jump => 0x8000_0000,
+            Self::Jump(_) => 0x8000_0000,
         }
     }
 
     /// Size of window into code needed to do the patch.
     fn patch_size(self) -> CodeOffset {
         match self {
-            Self::Jump => 4,
+            Self::Jump(_) => 4,
         }
     }
 
     /// Perform the patch.
     fn patch(self, buffer: &mut [u8], use_offset: CodeOffset, label_offset: CodeOffset) {
-        let pc_rel = (label_offset as i64) - (use_offset as i64);
-        debug_assert!(pc_rel <= self.max_pos_range() as i64);
-        debug_assert!(pc_rel >= -(self.max_neg_range() as i64));
-        let pc_rel = pc_rel as u32;
+        let use_relative = (label_offset as i64) - (use_offset as i64);
+        debug_assert!(use_relative <= self.max_pos_range() as i64);
+        debug_assert!(use_relative >= -(self.max_neg_range() as i64));
+        let pc_rel = i32::try_from(use_relative).unwrap() as u32;
         match self {
-            Self::Jump => {
-                let addend = u32::from_le_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]);
+            Self::Jump(addend) => {
                 let value = pc_rel.wrapping_add(addend);
+                trace!(
+                    "patching label use @ {use_offset:#x} to label {label_offset:#x} via \
+                     PC-relative offset {pc_rel:#x}"
+                );
                 buffer.copy_from_slice(&value.to_le_bytes()[..]);
             }
         }
@@ -541,14 +725,14 @@ impl MachInstLabelUse for LabelUse {
     /// Is a veneer supported for this label reference type?
     fn supports_veneer(self) -> bool {
         match self {
-            Self::Jump => false,
+            Self::Jump(_) => false,
         }
     }
 
     /// How large is the veneer, if supported?
     fn veneer_size(self) -> CodeOffset {
         match self {
-            Self::Jump => 0,
+            Self::Jump(_) => 0,
         }
     }
 
@@ -564,11 +748,20 @@ impl MachInstLabelUse for LabelUse {
         veneer_offset: CodeOffset,
     ) -> (CodeOffset, LabelUse) {
         match self {
-            Self::Jump => panic!("veneer not supported for {self:?}"),
+            Self::Jump(_) => panic!("veneer not supported for {self:?}"),
         }
     }
 
     fn from_reloc(reloc: Reloc, addend: Addend) -> Option<LabelUse> {
-        todo!()
+        match reloc {
+            Reloc::X86CallPCRel4 if addend < 0 => {
+                // We are always relocating some offset that is within an
+                // instruction, but pulley adds the offset relative to the PC
+                // pointing to the *start* of the instruction. Therefore, adjust
+                // back to the beginning of the instruction.
+                Some(LabelUse::Jump(i32::try_from(-addend).unwrap() as u32))
+            }
+            _ => None,
+        }
     }
 }

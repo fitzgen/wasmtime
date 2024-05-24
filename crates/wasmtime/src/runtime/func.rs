@@ -1068,12 +1068,19 @@ impl Func {
                 // to convert from the array call calling convention to its
                 // calling convention, or we need to make it use the array call
                 // calling convention all the time...
+                log::trace!(
+                    "FITZGEN: about to call, params_and_returns = {:#?}",
+                    core::slice::from_raw_parts(
+                        params_and_returns.cast_const(),
+                        params_and_returns_capacity
+                    )
+                );
                 use cranelift_pulley::interp::{Type, Val, XRegVal};
-                let rets = store
+                let _ = store
                     .0
                     .pulley_vm()
                     .call(
-                        int.func.cast(),
+                        int.host_call.cast(),
                         &[
                             Val::XReg(XRegVal::new_usize(func_ref.vmctx as usize)),
                             Val::XReg(
@@ -1088,9 +1095,14 @@ impl Func {
                         [],
                     )
                     .unwrap();
-                drop(rets);
-                panic!("FITZGEN: machine state: {:#?}", store.0.pulley_vm().state());
-                // panic!("FITZGEN: got {:?}", rets.collect::<Vec<_>>())
+                log::trace!(
+                    "FITZGEN: done with call, params_and_returns = {:#?}",
+                    core::slice::from_raw_parts(
+                        params_and_returns.cast_const(),
+                        params_and_returns_capacity
+                    )
+                );
+                Ok(())
             }
         }
     }

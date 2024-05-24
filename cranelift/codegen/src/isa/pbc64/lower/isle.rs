@@ -9,7 +9,7 @@ use generated_code::{Context, MInst};
 use crate::ir::{condcodes::*, immediates::*, types::*, *};
 use crate::isa::pbc64::{
     abi::*,
-    inst::{FReg, VReg, WritableFReg, WritableVReg, WritableXReg, XReg},
+    inst::{CallInfo, FReg, VReg, WritableFReg, WritableVReg, WritableXReg, XReg},
     *,
 };
 use crate::machinst::{
@@ -22,6 +22,9 @@ use regalloc2::PReg;
 type Unit = ();
 type VecArgPair = Vec<ArgPair>;
 type VecRetPair = Vec<RetPair>;
+type BoxCallInfo = Box<CallInfo>;
+type BoxReturnCallInfo = Box<CallInfo>;
+type BoxExternalName = Box<ExternalName>;
 
 pub(crate) struct Pbc64IsleContext<'a, 'b, I, B>
 where

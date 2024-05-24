@@ -10,6 +10,10 @@ extern crate std;
 #[allow(unused_extern_crates)] // Some cfg's don't use this.
 extern crate alloc;
 
+// TODO: make `struct BinaryOpRegs<T> { dst: T, src1: T, src2: T }` or something
+// and pack it into 2 bytes (5 bits for each operand; 2**5 = 32 possible
+// registers, and then only special isntructions to access special x registers)
+
 /// Calls the given macro with each opcode.
 macro_rules! for_each_op {
     ( $macro:ident ) => {
@@ -17,11 +21,13 @@ macro_rules! for_each_op {
             /// TODO FITZGEN
             ret = Ret;
             /// TODO FITZGEN
-            jump = Jump { offset: i32 };
+            call = Call { offset: PcRelOffset };
             /// TODO FITZGEN
-            br_if = BrIf { cond: XReg, offset: i32 };
+            jump = Jump { offset: PcRelOffset };
             /// TODO FITZGEN
-            br_if_not = BrIfNot { cond: XReg, offset: i32 };
+            br_if = BrIf { cond: XReg, offset: PcRelOffset };
+            /// TODO FITZGEN
+            br_if_not = BrIfNot { cond: XReg, offset: PcRelOffset };
 
             /// TODO FITZGEN
             xmov = Xmov { dst: XReg, src: XReg };
@@ -43,6 +49,31 @@ macro_rules! for_each_op {
             xadd32 = Xadd32 { dst: XReg, src1: XReg, src2: XReg };
             /// TODO FITZGEN
             xadd64 = Xadd64 { dst: XReg, src1: XReg, src2: XReg };
+
+            /// Equal.
+            xeq64 = Xeq64 { dst: XReg, src1: XReg, src2: XReg };
+            /// Not equal.
+            xneq64 = Xneq64 { dst: XReg, src1: XReg, src2: XReg };
+            /// Signed less-than.
+            xslt64 = Xslt64 { dst: XReg, src1: XReg, src2: XReg };
+            /// Signed less-than-equal.
+            xslteq64 = Xslteq64 { dst: XReg, src1: XReg, src2: XReg };
+            /// Unsigned less-than.
+            xult64 = Xult64 { dst: XReg, src1: XReg, src2: XReg };
+            /// Unsigned less-than-equal.
+            xulteq64 = Xulteq64 { dst: XReg, src1: XReg, src2: XReg };
+            /// Equal.
+            xeq32 = Xeq32 { dst: XReg, src1: XReg, src2: XReg };
+            /// Not equal.
+            xneq32 = Xneq32 { dst: XReg, src1: XReg, src2: XReg };
+            /// Signed less-than.
+            xslt32 = Xslt32 { dst: XReg, src1: XReg, src2: XReg };
+            /// Signed less-than-equal.
+            xslteq32 = Xslteq32 { dst: XReg, src1: XReg, src2: XReg };
+            /// Unsigned less-than.
+            xult32 = Xult32 { dst: XReg, src1: XReg, src2: XReg };
+            /// Unsigned less-than-equal.
+            xulteq32 = Xulteq32 { dst: XReg, src1: XReg, src2: XReg };
 
             /// TODO FITZGEN
             load32_u = LoadU32 { dst: XReg, ptr: XReg };
@@ -125,8 +156,12 @@ macro_rules! for_each_extended_op {
         $macro! {
             /// TODO FITZGEN
             trap = Trap;
+
             /// TODO FITZGEN
             nop = Nop;
+
+            /// TODO FITZGEN
+            get_sp = GetSp { dst: XReg };
         }
     };
 }
@@ -142,6 +177,9 @@ pub mod interp;
 
 pub mod regs;
 pub use regs::*;
+
+pub mod imms;
+pub use imms::*;
 
 pub mod op;
 pub use op::*;

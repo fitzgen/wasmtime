@@ -1,5 +1,6 @@
 //! Pulley bytecode operations with their operands.
 
+use crate::imms::*;
 use crate::regs::*;
 #[allow(unused_imports)] // Some `cfg`s don't use this.
 use alloc::vec::Vec;
@@ -206,17 +207,7 @@ for_each_extended_op!(define_extended_op_encode);
 /// TODO FITZGEN
 #[cfg(feature = "decode")]
 #[derive(Default)]
-pub struct MaterializeOpsVisitor {
-    ops: Vec<Op>,
-}
-
-#[cfg(feature = "decode")]
-impl MaterializeOpsVisitor {
-    /// TODO FITZGEN
-    pub fn finish(self) -> Vec<Op> {
-        self.ops
-    }
-}
+pub struct MaterializeOpsVisitor;
 
 macro_rules! define_materialize_op_visitor {
     (
@@ -227,7 +218,7 @@ macro_rules! define_materialize_op_visitor {
     ) => {
         #[cfg(feature = "decode")]
         impl crate::decode::OpVisitor for MaterializeOpsVisitor {
-            type Return = ();
+            type Return = Option<crate::op::Op>;
 
             $(
                 define_materialize_op_visitor! {
@@ -245,7 +236,7 @@ macro_rules! define_materialize_op_visitor {
         extended_op = ExtendedOp;
     ) => {
         $( #[$attr] )*
-        fn extended_op(&mut self) {}
+        fn extended_op(&mut self) -> Self::Return { None }
     };
     (
         @func
@@ -253,10 +244,10 @@ macro_rules! define_materialize_op_visitor {
         $snake_name:ident = $name:ident $( { $( $field:ident : $field_ty:ty ),* } )? ;
     ) => {
         $( #[$attr] )*
-        fn $snake_name(&mut self $( $( , $field : $field_ty )* )? ) {
-            self.ops.push(crate::op::Op::$name(crate::op::$name { $( $(
+        fn $snake_name(&mut self $( $( , $field : $field_ty )* )? ) -> Self::Return {
+            Some(crate::op::Op::$name(crate::op::$name { $( $(
                 $field,
-            )* )? }));
+            )* )? }))
         }
     };
 }
@@ -266,17 +257,17 @@ macro_rules! define_materialize_extended_op_visitor {
     (
         $(
             $( #[$attr:meta] )*
-                $snake_name:ident = $name:ident $( { $( $field:ident : $field_ty:ty ),* } )? ;
+            $snake_name:ident = $name:ident $( { $( $field:ident : $field_ty:ty ),* } )? ;
         )*
     ) => {
         #[cfg(feature = "decode")]
         impl crate::decode::ExtendedOpVisitor for MaterializeOpsVisitor {
             $(
                 $( #[$attr] )*
-                fn $snake_name(&mut self $( $( , $field : $field_ty )* )? ) {
-                    self.ops.push(crate::op::ExtendedOp::$name(crate::op::$name { $( $(
+                fn $snake_name(&mut self $( $( , $field : $field_ty )* )? ) -> Self::Return {
+                    Some(crate::op::ExtendedOp::$name(crate::op::$name { $( $(
                         $field,
-                    )* )? }).into());
+                    )* )? }).into())
                 }
             )*
         }

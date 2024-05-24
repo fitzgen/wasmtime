@@ -1,5 +1,6 @@
 //! Encoding support for pulley bytecode.
 
+use crate::imms::*;
 use crate::opcode::{ExtendedOpcode, Opcode};
 use crate::regs::*;
 
@@ -108,6 +109,15 @@ impl Encode for VReg {
     }
 }
 
+impl Encode for PcRelOffset {
+    fn encode<E>(&self, sink: &mut E)
+    where
+        E: Extend<u8>,
+    {
+        i32::from(*self).encode(sink);
+    }
+}
+
 macro_rules! impl_encoders {
     (
         $(
@@ -122,14 +132,14 @@ macro_rules! impl_encoders {
     ) => {
         $(
             $( #[$attr] )*
-            pub fn $snake_name<E>(into: &mut E $( $( , $field : $field_ty )* )? )
+            pub fn $snake_name<E>(into: &mut E $( $( , $field : impl Into<$field_ty> )* )? )
             where
                 E: Extend<u8>,
             {
                 into.extend(core::iter::once(Opcode::$name as u8));
                 $(
                     $(
-                        $field.encode(into);
+                        $field.into().encode(into);
                     )*
                 )?
             }
@@ -145,14 +155,14 @@ macro_rules! impl_extended_encoders {
                 $snake_name:ident = $name:ident $( {
                     $(
                         $( #[$field_attr:meta] )*
-                            $field:ident : $field_ty:ty
+                        $field:ident : $field_ty:ty
                     ),*
                 } )? ;
         )*
     ) => {
         $(
             $( #[$attr] )*
-            pub fn $snake_name<E>(into: &mut E $( $( , $field : $field_ty )* )? )
+            pub fn $snake_name<E>(into: &mut E $( $( , $field : impl Into<$field_ty> )* )? )
             where
                 E: Extend<u8>,
             {
@@ -160,7 +170,7 @@ macro_rules! impl_extended_encoders {
                 into.extend((ExtendedOpcode::$name as u16).to_le_bytes());
                 $(
                     $(
-                        $field.encode(into);
+                        $field.into().encode(into);
                     )*
                 )?
             }

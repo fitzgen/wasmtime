@@ -344,8 +344,9 @@ struct CompileOutput {
 /// The collection of things we need to compile for a Wasm module or component.
 #[derive(Default)]
 struct CompileInputs<'a> {
-    // Whether or not we need to compile trampolines between the host and Wasm.
-    need_trampolines: bool,
+    // Whether or not we need to compile wasm-to-native trampolines.
+    need_wasm_to_native_trampolines: bool,
+
     inputs: Vec<CompileInput<'a>>,
 }
 
@@ -362,7 +363,8 @@ impl<'a> CompileInputs<'a> {
         functions: PrimaryMap<DefinedFuncIndex, FunctionBodyData<'a>>,
     ) -> Self {
         let mut ret = CompileInputs {
-            need_trampolines: triple.architecture != target_lexicon::Architecture::Pbc64,
+            need_wasm_to_native_trampolines: triple.architecture
+                != target_lexicon::Architecture::Pbc64,
             inputs: vec![],
         };
 
@@ -387,7 +389,8 @@ impl<'a> CompileInputs<'a> {
         >,
     ) -> Self {
         let mut ret = CompileInputs {
-            need_trampolines: triple.architecture != target_lexicon::Architecture::Pbc64,
+            need_wasm_to_native_trampolines: triple.architecture
+                != target_lexicon::Architecture::Pbc64,
             inputs: vec![],
         };
 
@@ -461,7 +464,7 @@ impl<'a> CompileInputs<'a> {
                 });
 
                 let func_index = translation.module.func_index(def_func_index);
-                if self.need_trampolines && translation.module.functions[func_index].is_escaping() {
+                if translation.module.functions[func_index].is_escaping() {
                     self.push_input(move |compiler| {
                         let func_index = translation.module.func_index(def_func_index);
                         let trampoline = compiler.compile_array_to_wasm_trampoline(
@@ -503,7 +506,7 @@ impl<'a> CompileInputs<'a> {
             }
         }
 
-        if self.need_trampolines {
+        if self.need_wasm_to_native_trampolines {
             let mut trampoline_types_seen = HashSet::new();
             for (_func_type_index, trampoline_type_index) in types.trampoline_types() {
                 let is_new = trampoline_types_seen.insert(trampoline_type_index);

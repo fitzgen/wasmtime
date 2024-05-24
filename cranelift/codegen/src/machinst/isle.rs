@@ -592,7 +592,6 @@ macro_rules! isle_lower_prelude_methods {
                     self.put_in_regs(val)
                 })
                 .collect();
-            crate::trace!("FITZGEN: wtf calling lower_ctx.gen_return");
             self.lower_ctx.gen_return(rets);
         }
 

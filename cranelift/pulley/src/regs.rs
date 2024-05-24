@@ -11,8 +11,14 @@ macro_rules! define_registers {
 ) => {
         $(
             $( #[ $attr ] )*
-            #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+            #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
             pub struct $name(u8);
+
+            impl core::fmt::Debug for $name {
+                fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                    core::fmt::Display::fmt(self, f)
+                }
+            }
 
             impl $name {
                 /// The valid register range for this register class.

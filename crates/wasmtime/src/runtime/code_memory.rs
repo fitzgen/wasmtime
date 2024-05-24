@@ -131,7 +131,8 @@ impl CodeMemory {
                 _ => log::debug!("ignoring section {name}"),
             }
         }
-        Ok(Self {
+
+        let ret = Self {
             mmap: ManuallyDrop::new(mmap),
             unwind_registration: ManuallyDrop::new(None),
             published: false,
@@ -146,7 +147,13 @@ impl CodeMemory {
             info_data,
             wasm_data,
             relocations,
-        })
+        };
+
+        let mut disas = cranelift_pulley::disas::Disassembler::new(ret.text());
+        let _ = cranelift_pulley::decode::Decoder::decode_all(ret.text(), &mut disas);
+        log::debug!("FITZGEN: CodeMemory::new() disassembly:\n{}", disas.disas());
+
+        Ok(ret)
     }
 
     /// Returns a reference to the underlying `MmapVec` this memory owns.

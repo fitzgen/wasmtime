@@ -496,57 +496,49 @@ impl ABIMachineSpec for Pbc64MachineDeps {
         caller_conv: isa::CallConv,
         callee_pop_size: u32,
     ) -> SmallVec<[Self::I; 2]> {
-        todo!()
-        // let mut insts = SmallVec::new();
-        // if callee_conv == isa::CallConv::Tail {
-        //     match &dest {
-        //         &CallDest::ExtName(ref name, RelocDistance::Near) => insts.push(Inst::Call {
-        //             info: Box::new(CallInfo {
-        //                 dest: name.clone(),
-        //                 uses,
-        //                 defs,
-        //                 clobbers,
-        //                 opcode,
-        //                 caller_callconv: caller_conv,
-        //                 callee_callconv: callee_conv,
-        //                 callee_pop_size,
-        //             }),
-        //         }),
-        //         &CallDest::ExtName(ref name, RelocDistance::Far) => {
-        //             insts.push(Inst::LoadExtName {
-        //                 rd: tmp,
-        //                 name: Box::new(name.clone()),
-        //                 offset: 0,
-        //             });
-        //             insts.push(Inst::CallInd {
-        //                 info: Box::new(CallIndInfo {
-        //                     rn: tmp.to_reg(),
-        //                     uses,
-        //                     defs,
-        //                     clobbers,
-        //                     opcode,
-        //                     caller_callconv: caller_conv,
-        //                     callee_callconv: callee_conv,
-        //                     callee_pop_size,
-        //                 }),
-        //             });
-        //         }
-        //         &CallDest::Reg(reg) => insts.push(Inst::CallInd {
-        //             info: Box::new(CallIndInfo {
-        //                 rn: *reg,
-        //                 uses,
-        //                 defs,
-        //                 clobbers,
-        //                 opcode,
-        //                 caller_callconv: caller_conv,
-        //                 callee_callconv: callee_conv,
-        //                 callee_pop_size,
-        //             }),
-        //         }),
-        //     }
-        // } else {
-        // }
-        // insts
+        if callee_conv == isa::CallConv::Tail || callee_conv == isa::CallConv::Fast {
+            match &dest {
+                &CallDest::ExtName(ref name, RelocDistance::Near) => smallvec![Inst::Call {
+                    callee: Box::new(name.clone()),
+                    info: Box::new(CallInfo {
+                        uses,
+                        defs,
+                        clobbers,
+                        opcode,
+                        callee_pop_size,
+                    }),
+                }],
+                &CallDest::ExtName(ref name, RelocDistance::Far) => smallvec![
+                    Inst::LoadExtName {
+                        dst: WritableXReg::try_from(tmp).unwrap(),
+                        name: Box::new(name.clone()),
+                        offset: 0,
+                    },
+                    Inst::IndirectCall {
+                        callee: XReg::new(tmp.to_reg()).unwrap(),
+                        info: Box::new(CallInfo {
+                            uses,
+                            defs,
+                            clobbers,
+                            opcode,
+                            callee_pop_size,
+                        }),
+                    }
+                ],
+                &CallDest::Reg(reg) => smallvec![Inst::IndirectCall {
+                    callee: XReg::new(*reg).unwrap(),
+                    info: Box::new(CallInfo {
+                        uses,
+                        defs,
+                        clobbers,
+                        opcode,
+                        callee_pop_size,
+                    }),
+                }],
+            }
+        } else {
+            todo!("host calls? callee_conv = {callee_conv:?}; caller_conv = {caller_conv:?}")
+        }
     }
 
     fn gen_memcpy<F: FnMut(Type) -> Writable<Reg>>(

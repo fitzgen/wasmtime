@@ -158,7 +158,13 @@ impl CompiledModule {
     #[inline]
     pub fn finished_function(&self, index: DefinedFuncIndex) -> &[u8] {
         let loc = self.funcs[index].wasm_func_loc;
-        &self.text()[loc.start as usize..][..loc.length as usize]
+        let ret = &self.text()[loc.start as usize..][..loc.length as usize];
+
+        let mut disas = cranelift_pulley::disas::Disassembler::new(&ret);
+        let _ = cranelift_pulley::decode::Decoder::decode_all(&ret, &mut disas);
+        log::debug!("FITZGEN: finished_function disassembly:\n{}", disas.disas());
+
+        ret
     }
 
     /// Get the array-to-Wasm trampoline for the function `index` points to.
@@ -170,7 +176,16 @@ impl CompiledModule {
     /// calling Wasm callees.
     pub fn array_to_wasm_trampoline(&self, index: DefinedFuncIndex) -> Option<&[u8]> {
         let loc = self.funcs[index].array_to_wasm_trampoline?;
-        Some(&self.text()[loc.start as usize..][..loc.length as usize])
+        let ret = &self.text()[loc.start as usize..][..loc.length as usize];
+
+        let mut disas = cranelift_pulley::disas::Disassembler::new(&ret);
+        let _ = cranelift_pulley::decode::Decoder::decode_all(&ret, &mut disas);
+        log::debug!(
+            "FITZGEN: array_to_wasm_trampoline disassembly:\n{}",
+            disas.disas()
+        );
+
+        Some(ret)
     }
 
     /// Get the native-to-Wasm trampoline for the function `index` points to.

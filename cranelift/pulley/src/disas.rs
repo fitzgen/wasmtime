@@ -1,12 +1,14 @@
 //! Disassembly support for pulley bytecode.
 
 use crate::decode::*;
+use crate::imms::*;
 use crate::regs::*;
 use alloc::string::String;
 use core::fmt::Write;
 
 /// TODO FITZGEN
 pub struct Disassembler<'a> {
+    // TODO FITZGEN: this field no longer used
     bytecode: &'a [u8],
     position: usize,
     disas: String,
@@ -25,6 +27,84 @@ impl<'a> Disassembler<'a> {
     /// TODO FITZGEN
     pub fn disas(&self) -> &str {
         &self.disas
+    }
+}
+
+trait Disas {
+    fn disas(&self, position: usize, disas: &mut String);
+}
+
+impl Disas for XReg {
+    fn disas(&self, _position: usize, disas: &mut String) {
+        write!(disas, "{self}").unwrap();
+    }
+}
+
+impl Disas for FReg {
+    fn disas(&self, _position: usize, disas: &mut String) {
+        write!(disas, "{self}").unwrap();
+    }
+}
+
+impl Disas for VReg {
+    fn disas(&self, _position: usize, disas: &mut String) {
+        write!(disas, "{self}").unwrap();
+    }
+}
+
+impl Disas for i8 {
+    fn disas(&self, _position: usize, disas: &mut String) {
+        write!(disas, "{self}").unwrap();
+    }
+}
+
+impl Disas for i16 {
+    fn disas(&self, _position: usize, disas: &mut String) {
+        write!(disas, "{self}").unwrap();
+    }
+}
+
+impl Disas for i32 {
+    fn disas(&self, _position: usize, disas: &mut String) {
+        write!(disas, "{self}").unwrap();
+    }
+}
+
+impl Disas for i64 {
+    fn disas(&self, _position: usize, disas: &mut String) {
+        write!(disas, "{self}").unwrap();
+    }
+}
+
+impl Disas for u8 {
+    fn disas(&self, _position: usize, disas: &mut String) {
+        write!(disas, "{self}").unwrap();
+    }
+}
+
+impl Disas for u16 {
+    fn disas(&self, _position: usize, disas: &mut String) {
+        write!(disas, "{self}").unwrap();
+    }
+}
+
+impl Disas for u32 {
+    fn disas(&self, _position: usize, disas: &mut String) {
+        write!(disas, "{self}").unwrap();
+    }
+}
+
+impl Disas for u64 {
+    fn disas(&self, _position: usize, disas: &mut String) {
+        write!(disas, "{self}").unwrap();
+    }
+}
+
+impl Disas for PcRelOffset {
+    fn disas(&self, position: usize, disas: &mut String) {
+        let offset = isize::try_from(i32::from(*self)).unwrap();
+        let target = position.wrapping_add(offset as usize);
+        write!(disas, "{offset:#x}    // target = {target:#x}").unwrap()
     }
 }
 
@@ -68,11 +148,11 @@ macro_rules! impl_disas {
                         let mut need_comma = false;
                         $(
                             let val = $field;
-                            write!(
-                                &mut self.disas,
-                                "{} {val}",
-                                if need_comma { "," } else { "" },
-                            ).unwrap();
+                            if need_comma {
+                                write!(&mut self.disas, ",").unwrap();
+                            }
+                            write!(&mut self.disas, " ").unwrap();
+                            val.disas(self.position, &mut self.disas);
                             #[allow(unused_assignments)]
                             { need_comma = true; }
                         )*
@@ -104,14 +184,14 @@ macro_rules! impl_extended_disas {
                     $(
                         let mut need_comma = false;
                         $(
-                            let field = stringify!($field);
                             let val = $field;
-                            write!(
-                                &mut self.disas,
-                                "{} {field}={val}",
-                                if need_comma { "," } else { "" },
-                            ).unwrap();
-                            need_comma = true;
+                            if need_comma {
+                                write!(&mut self.disas, ",").unwrap();
+                            }
+                            write!(&mut self.disas, " ").unwrap();
+                            val.disas(self.position, &mut self.disas);
+                            #[allow(unused_assignments)]
+                            { need_comma = true; }
                         )*
                     )?
                 }

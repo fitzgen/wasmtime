@@ -675,14 +675,24 @@ pub struct VMFuncRefInterpreterState {
     /// is always non-null) so that we can use this as a discriminant for the
     /// `VMFuncRefPayload` union.
     tag: usize,
+    /// Function pointer for this funcref if being called via the "array"
+    /// calling convention that `Func::new` et al use.
+    pub host_call: NonNull<VMWasmCallFunction>,
     /// TODO FITZGEN
-    pub func: NonNull<VMWasmCallFunction>,
+    pub interpreter_call: NonNull<VMWasmCallFunction>,
 }
 
 impl VMFuncRefInterpreterState {
     /// TODO FITZGEN
-    pub fn new(func: NonNull<VMWasmCallFunction>) -> Self {
-        Self { tag: 0, func }
+    pub fn new(
+        host_call: NonNull<VMWasmCallFunction>,
+        interpreter_call: NonNull<VMWasmCallFunction>,
+    ) -> Self {
+        Self {
+            tag: 0,
+            host_call,
+            interpreter_call,
+        }
     }
 }
 

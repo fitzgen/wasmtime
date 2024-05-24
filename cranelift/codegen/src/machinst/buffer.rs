@@ -798,7 +798,12 @@ impl<I: VCodeInst> MachBuffer<I> {
         assert!(self.cur_offset() == start);
         debug_assert!(end > start);
         assert!(!self.pending_fixup_records.is_empty());
-        debug_assert!(inverted.len() == (end - start) as usize);
+        debug_assert!(
+            inverted.len() == (end - start) as usize,
+            "branch length = {}, but inverted length = {}",
+            end - start,
+            inverted.len()
+        );
         let fixup = self.pending_fixup_records.len() - 1;
         let inverted = Some(SmallVec::from(inverted));
         self.lazily_clear_labels_at_tail();
@@ -1422,7 +1427,7 @@ impl<I: VCodeInst> MachBuffer<I> {
                 self.emit_veneer(label, offset, kind);
             } else {
                 let slice = &mut self.data[start..end];
-                trace!("patching in-range!");
+                trace!("patching in-range! slice = {slice:?}; offset = {offset:#x}; label_offset = {label_offset:#x}");
                 kind.patch(slice, offset, label_offset);
             }
         } else {
@@ -1535,6 +1540,13 @@ impl<I: VCodeInst> MachBuffer<I> {
 
         let mut srclocs = self.srclocs;
         srclocs.sort_by_key(|entry| entry.start);
+
+        let mut disas = cranelift_pulley::disas::Disassembler::new(&self.data);
+        let _ = cranelift_pulley::decode::Decoder::decode_all(&self.data, &mut disas);
+        log::debug!(
+            "FITZGEN: MachBuffer::finish disassembly:\n{}",
+            disas.disas()
+        );
 
         MachBufferFinalized {
             data: self.data,
@@ -1681,6 +1693,14 @@ impl<I: VCodeInst> MachBuffer<I> {
             offset_end: end,
             stack_map,
         });
+    }
+}
+
+impl<I: VCodeInst> Extend<u8> for MachBuffer<I> {
+    fn extend<T: IntoIterator<Item = u8>>(&mut self, iter: T) {
+        for b in iter {
+            self.put1(b);
+        }
     }
 }
 

@@ -728,7 +728,21 @@ impl Instance {
                 payload: if unsafe {
                     *self.vmctx_plus_offset(self.offsets().vmctx_is_interpreter())
                 } {
-                    VMFuncRefInterpreterState::new(self.runtime_info.function(def_index)).into()
+                    VMFuncRefInterpreterState::new(
+                        unsafe {
+                            // TODO FITZGEN: replace this transmute with
+                            // whatever the frickin casts necessary are
+                            mem::transmute(
+                                self.runtime_info
+                                    .array_to_wasm_trampoline(def_index)
+                                    .expect(
+                                    "should have native-to-Wasm trampoline for escaping function",
+                                ),
+                            )
+                        },
+                        self.runtime_info.function(def_index),
+                    )
+                    .into()
                 } else {
                     VMFuncRefTrampolines {
                         native_call: self
