@@ -22,12 +22,27 @@ macro_rules! for_each_op {
             ret = Ret;
             /// TODO FITZGEN
             call = Call { offset: PcRelOffset };
+
             /// TODO FITZGEN
             jump = Jump { offset: PcRelOffset };
+
             /// TODO FITZGEN
             br_if = BrIf { cond: XReg, offset: PcRelOffset };
             /// TODO FITZGEN
             br_if_not = BrIfNot { cond: XReg, offset: PcRelOffset };
+
+            /// Branch if `a == b`.
+            br_if_xeq32 = BrIfXeq32 { a: XReg, b: XReg, offset: PcRelOffset };
+            /// Branch if `a != `b.
+            br_if_xneq32 = BrIfXneq32 { a: XReg, b: XReg, offset: PcRelOffset };
+            /// Branch if signed `a < b`.
+            br_if_xslt32 = BrIfXslt32 { a: XReg, b: XReg, offset: PcRelOffset };
+            /// Branch if signed `a <= b`.
+            br_if_xslteq32 = BrIfXslteq32 { a: XReg, b: XReg, offset: PcRelOffset };
+            /// Branch if unsigned `a < b`.
+            br_if_xult32 = BrIfXult32 { a: XReg, b: XReg, offset: PcRelOffset };
+            /// Branch if unsigned `a <= b`.
+            br_if_xulteq32 = BrIfXulteq32 { a: XReg, b: XReg, offset: PcRelOffset };
 
             /// TODO FITZGEN
             xmov = Xmov { dst: XReg, src: XReg };

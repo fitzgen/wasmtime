@@ -48,6 +48,14 @@
     ;; Jump to `then` if `c` is nonzero, otherwise to `else`.
     (BrIf (c XReg) (taken MachLabel) (not_taken MachLabel))
 
+    ;; Compare-and-branch macro ops.
+    (BrIfXeq32 (src1 XReg) (src2 XReg) (taken MachLabel) (not_taken MachLabel))
+    (BrIfXneq32 (src1 XReg) (src2 XReg) (taken MachLabel) (not_taken MachLabel))
+    (BrIfXslt32 (src1 XReg) (src2 XReg) (taken MachLabel) (not_taken MachLabel))
+    (BrIfXslteq32 (src1 XReg) (src2 XReg) (taken MachLabel) (not_taken MachLabel))
+    (BrIfXult32 (src1 XReg) (src2 XReg) (taken MachLabel) (not_taken MachLabel))
+    (BrIfXulteq32 (src1 XReg) (src2 XReg) (taken MachLabel) (not_taken MachLabel))
+
     ;; Register-to-register moves.
     (Xmov (dst WritableXReg) (src XReg))
     (Fmov (dst WritableFReg) (src FReg))
@@ -396,6 +404,30 @@
 (decl pbc_br_if (XReg MachLabel MachLabel) SideEffectNoResult)
 (rule (pbc_br_if c taken not_taken)
       (SideEffectNoResult.Inst (MInst.BrIf c taken not_taken)))
+
+(decl pbc_br_if_xeq32 (XReg XReg MachLabel MachLabel) SideEffectNoResult)
+(rule (pbc_br_if_xeq32 a b taken not_taken)
+      (SideEffectNoResult.Inst (MInst.BrIfXeq32 a b taken not_taken)))
+
+(decl pbc_br_if_xneq32 (XReg XReg MachLabel MachLabel) SideEffectNoResult)
+(rule (pbc_br_if_xneq32 a b taken not_taken)
+      (SideEffectNoResult.Inst (MInst.BrIfXneq32 a b taken not_taken)))
+
+(decl pbc_br_if_xslt32 (XReg XReg MachLabel MachLabel) SideEffectNoResult)
+(rule (pbc_br_if_xslt32 a b taken not_taken)
+      (SideEffectNoResult.Inst (MInst.BrIfXslt32 a b taken not_taken)))
+
+(decl pbc_br_if_xslteq32 (XReg XReg MachLabel MachLabel) SideEffectNoResult)
+(rule (pbc_br_if_xslteq32 a b taken not_taken)
+      (SideEffectNoResult.Inst (MInst.BrIfXslteq32 a b taken not_taken)))
+
+(decl pbc_br_if_xult32 (XReg XReg MachLabel MachLabel) SideEffectNoResult)
+(rule (pbc_br_if_xult32 a b taken not_taken)
+      (SideEffectNoResult.Inst (MInst.BrIfXult32 a b taken not_taken)))
+
+(decl pbc_br_if_xulteq32 (XReg XReg MachLabel MachLabel) SideEffectNoResult)
+(rule (pbc_br_if_xulteq32 a b taken not_taken)
+      (SideEffectNoResult.Inst (MInst.BrIfXulteq32 a b taken not_taken)))
 
 (decl pbc_xadd32 (XReg XReg) XReg)
 (rule (pbc_xadd32 a b)

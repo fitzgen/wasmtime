@@ -14,9 +14,39 @@
 (rule (lower_branch (jump _) (single_target label))
       (emit_side_effect (pbc_jump label)))
 
-;; Conditional branches.
-(rule (lower_branch (brif (maybe_uextend c) _ _) (two_targets then else))
+;; Generic case for conditional branches.
+(rule -1 (lower_branch (brif (maybe_uextend c) _ _) (two_targets then else))
       (emit_side_effect (pbc_br_if c then else)))
+
+;; Conditional branches on `icmp`s.
+(rule (lower_branch (brif (maybe_uextend (icmp cc a b @ (value_type $I32))) _ _)
+                    (two_targets then else))
+      (emit_side_effect (lower_brif_of_icmp32 cc a b then else)))
+
+(decl lower_brif_of_icmp32 (IntCC Value Value MachLabel MachLabel) SideEffectNoResult)
+(rule (lower_brif_of_icmp32 (IntCC.Equal) a b then else)
+      (pbc_br_if_xeq32 a b then else))
+(rule (lower_brif_of_icmp32 (IntCC.NotEqual) a b then else)
+      (pbc_br_if_xneq32 a b then else))
+(rule (lower_brif_of_icmp32 (IntCC.SignedLessThan) a b then else)
+      (pbc_br_if_xslt32 a b then else))
+(rule (lower_brif_of_icmp32 (IntCC.SignedLessThanOrEqual) a b then else)
+      (pbc_br_if_xslteq32 a b then else))
+(rule (lower_brif_of_icmp32 (IntCC.UnsignedLessThan) a b then else)
+      (pbc_br_if_xult32 a b then else))
+(rule (lower_brif_of_icmp32 (IntCC.UnsignedLessThanOrEqual) a b then else)
+      (pbc_br_if_xulteq32 a b then else))
+
+;; Pulley doesn't have instructions for `>` and `>=`, so we have to reverse the
+;; operation.
+(rule (lower_brif_of_icmp32 (IntCC.SignedGreaterThan) a b then else)
+      (lower_brif_of_icmp32 (IntCC.SignedLessThan) b a then else))
+(rule (lower_brif_of_icmp32 (IntCC.SignedGreaterThanOrEqual) a b then else)
+      (lower_brif_of_icmp32 (IntCC.SignedLessThanOrEqual) b a then else))
+(rule (lower_brif_of_icmp32 (IntCC.UnsignedGreaterThan) a b then else)
+      (lower_brif_of_icmp32 (IntCC.UnsignedLessThan) b a then else))
+(rule (lower_brif_of_icmp32 (IntCC.UnsignedGreaterThanOrEqual) a b then else)
+      (lower_brif_of_icmp32 (IntCC.UnsignedLessThanOrEqual) b a then else))
 
 ;; Branch tables.
 (decl lower_br_table (Reg MachLabelSlice) Unit)

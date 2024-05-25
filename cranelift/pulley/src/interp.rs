@@ -667,6 +667,7 @@ impl OpVisitor for InterpreterVisitor<'_> {
     fn jump(&mut self, offset: PcRelOffset) -> Self::Return {
         self.pc_rel_jump(offset, 5)
     }
+
     fn br_if(&mut self, cond: XReg, offset: PcRelOffset) -> Self::Return {
         let cond = self.state.x(cond).get_u64();
         if cond != 0 {
@@ -675,6 +676,7 @@ impl OpVisitor for InterpreterVisitor<'_> {
             Continuation::Continue
         }
     }
+
     fn br_if_not(&mut self, cond: XReg, offset: PcRelOffset) -> Self::Return {
         let cond = self.state.x(cond).get_u64();
         if cond == 0 {
@@ -683,33 +685,100 @@ impl OpVisitor for InterpreterVisitor<'_> {
             Continuation::Continue
         }
     }
+
+    fn br_if_xeq32(&mut self, a: XReg, b: XReg, offset: PcRelOffset) -> Self::Return {
+        let a = self.state.x(a).get_u32();
+        let b = self.state.x(b).get_u32();
+        if a == b {
+            self.pc_rel_jump(offset, 7)
+        } else {
+            Continuation::Continue
+        }
+    }
+
+    fn br_if_xneq32(&mut self, a: XReg, b: XReg, offset: PcRelOffset) -> Self::Return {
+        let a = self.state.x(a).get_u32();
+        let b = self.state.x(b).get_u32();
+        if a != b {
+            self.pc_rel_jump(offset, 7)
+        } else {
+            Continuation::Continue
+        }
+    }
+
+    fn br_if_xslt32(&mut self, a: XReg, b: XReg, offset: PcRelOffset) -> Self::Return {
+        let a = self.state.x(a).get_i32();
+        let b = self.state.x(b).get_i32();
+        if a < b {
+            self.pc_rel_jump(offset, 7)
+        } else {
+            Continuation::Continue
+        }
+    }
+
+    fn br_if_xslteq32(&mut self, a: XReg, b: XReg, offset: PcRelOffset) -> Self::Return {
+        let a = self.state.x(a).get_i32();
+        let b = self.state.x(b).get_i32();
+        if a <= b {
+            self.pc_rel_jump(offset, 7)
+        } else {
+            Continuation::Continue
+        }
+    }
+
+    fn br_if_xult32(&mut self, a: XReg, b: XReg, offset: PcRelOffset) -> Self::Return {
+        let a = self.state.x(a).get_u32();
+        let b = self.state.x(b).get_u32();
+        if a < b {
+            self.pc_rel_jump(offset, 7)
+        } else {
+            Continuation::Continue
+        }
+    }
+
+    fn br_if_xulteq32(&mut self, a: XReg, b: XReg, offset: PcRelOffset) -> Self::Return {
+        let a = self.state.x(a).get_u32();
+        let b = self.state.x(b).get_u32();
+        if a <= b {
+            self.pc_rel_jump(offset, 7)
+        } else {
+            Continuation::Continue
+        }
+    }
+
     fn xmov(&mut self, dst: XReg, src: XReg) -> Self::Return {
         let val = self.state.get_x(src);
         self.state.set_x(dst, val);
         Continuation::Continue
     }
+
     fn fmov(&mut self, dst: FReg, src: FReg) -> Self::Return {
         let val = self.state.get_f(src);
         self.state.set_f(dst, val);
         Continuation::Continue
     }
+
     fn vmov(&mut self, dst: VReg, src: VReg) -> Self::Return {
         let val = self.state.get_v(src);
         self.state.set_v(dst, val);
         Continuation::Continue
     }
+
     fn xconst8(&mut self, dst: XReg, imm: u8) -> Self::Return {
         self.state.x_mut(dst).set_u64(u64::from(imm));
         Continuation::Continue
     }
+
     fn xconst16(&mut self, dst: XReg, imm: u16) -> Self::Return {
         self.state.x_mut(dst).set_u64(u64::from(imm));
         Continuation::Continue
     }
+
     fn xconst32(&mut self, dst: XReg, imm: u32) -> Self::Return {
         self.state.x_mut(dst).set_u64(u64::from(imm));
         Continuation::Continue
     }
+
     fn xconst64(&mut self, dst: XReg, imm: u64) -> Self::Return {
         self.state.x_mut(dst).set_u64(imm);
         Continuation::Continue
@@ -721,6 +790,7 @@ impl OpVisitor for InterpreterVisitor<'_> {
         self.state.x_mut(dst).set_u32(a.wrapping_add(b));
         Continuation::Continue
     }
+
     fn xadd64(&mut self, dst: XReg, src1: XReg, src2: XReg) -> Self::Return {
         let a = self.state.x(src1).get_u64();
         let b = self.state.x(src2).get_u64();
@@ -819,9 +889,11 @@ impl OpVisitor for InterpreterVisitor<'_> {
         self.state.x_mut(dst).set_u64(u64::from(val));
         Continuation::Continue
     }
+
     fn load32_s(&mut self, dst: XReg, ptr: XReg) -> Self::Return {
         todo!()
     }
+
     fn load64(&mut self, dst: XReg, ptr: XReg) -> Self::Return {
         let ptr = self.state.x(ptr).get_usize();
         let ptr = ptr as *mut u64;
@@ -839,9 +911,11 @@ impl OpVisitor for InterpreterVisitor<'_> {
         self.state.x_mut(dst).set_u64(u64::from(val));
         Continuation::Continue
     }
+
     fn load32_s_offset8(&mut self, dst: XReg, ptr: XReg, offset: i8) -> Self::Return {
         todo!()
     }
+
     fn load64_offset8(&mut self, dst: XReg, ptr: XReg, offset: i8) -> Self::Return {
         let ptr = self.state.x(ptr).get_usize();
         let offset = isize::from(offset);
@@ -855,9 +929,11 @@ impl OpVisitor for InterpreterVisitor<'_> {
     fn load32_u_offset16(&mut self, dst: XReg, ptr: XReg, offset: i16) -> Self::Return {
         todo!()
     }
+
     fn load32_s_offset16(&mut self, dst: XReg, ptr: XReg, offset: i16) -> Self::Return {
         todo!()
     }
+
     fn load64_offset16(&mut self, dst: XReg, ptr: XReg, offset: i16) -> Self::Return {
         todo!()
     }
@@ -865,9 +941,11 @@ impl OpVisitor for InterpreterVisitor<'_> {
     fn load32_u_offset32(&mut self, dst: XReg, ptr: XReg, offset: i32) -> Self::Return {
         todo!()
     }
+
     fn load32_s_offset32(&mut self, dst: XReg, ptr: XReg, offset: i32) -> Self::Return {
         todo!()
     }
+
     fn load64_offset32(&mut self, dst: XReg, ptr: XReg, offset: i32) -> Self::Return {
         todo!()
     }
@@ -875,9 +953,11 @@ impl OpVisitor for InterpreterVisitor<'_> {
     fn load32_u_offset64(&mut self, dst: XReg, ptr: XReg, offset: i64) -> Self::Return {
         todo!()
     }
+
     fn load32_s_offset64(&mut self, dst: XReg, ptr: XReg, offset: i64) -> Self::Return {
         todo!()
     }
+
     fn load64_offset64(&mut self, dst: XReg, ptr: XReg, offset: i64) -> Self::Return {
         todo!()
     }
@@ -891,6 +971,7 @@ impl OpVisitor for InterpreterVisitor<'_> {
         }
         Continuation::Continue
     }
+
     fn store64(&mut self, ptr: XReg, src: XReg) -> Self::Return {
         let ptr = self.state.x(ptr).get_usize();
         let ptr = ptr as *mut u64;
@@ -904,6 +985,7 @@ impl OpVisitor for InterpreterVisitor<'_> {
     fn store32_offset8(&mut self, ptr: XReg, offset: i8, src: XReg) -> Self::Return {
         todo!()
     }
+
     fn store64_offset8(&mut self, ptr: XReg, offset: i8, src: XReg) -> Self::Return {
         let ptr = self.state.x(ptr).get_usize();
         let offset = isize::from(offset);
@@ -919,6 +1001,7 @@ impl OpVisitor for InterpreterVisitor<'_> {
     fn store32_offset16(&mut self, ptr: XReg, offset: i16, src: XReg) -> Self::Return {
         todo!()
     }
+
     fn store64_offset16(&mut self, ptr: XReg, offset: i16, src: XReg) -> Self::Return {
         todo!()
     }
@@ -926,6 +1009,7 @@ impl OpVisitor for InterpreterVisitor<'_> {
     fn store32_offset32(&mut self, ptr: XReg, offset: i32, src: XReg) -> Self::Return {
         todo!()
     }
+
     fn store64_offset32(&mut self, ptr: XReg, offset: i32, src: XReg) -> Self::Return {
         todo!()
     }
@@ -933,6 +1017,7 @@ impl OpVisitor for InterpreterVisitor<'_> {
     fn store32_offset64(&mut self, ptr: XReg, offset: i64, src: XReg) -> Self::Return {
         todo!()
     }
+
     fn store64_offset64(&mut self, ptr: XReg, offset: i64, src: XReg) -> Self::Return {
         todo!()
     }
@@ -944,6 +1029,7 @@ impl OpVisitor for InterpreterVisitor<'_> {
             .set_u64(u32::from_ne_bytes(val.to_ne_bytes()).into());
         Continuation::Continue
     }
+
     fn bitcast_int_from_float_64(&mut self, dst: XReg, src: FReg) -> Self::Return {
         let val = self.state.f(src).get_f64();
         self.state
@@ -951,6 +1037,7 @@ impl OpVisitor for InterpreterVisitor<'_> {
             .set_u64(u64::from_ne_bytes(val.to_ne_bytes()));
         Continuation::Continue
     }
+
     fn bitcast_float_from_int_32(&mut self, dst: FReg, src: XReg) -> Self::Return {
         let val = self.state.x(src).get_u32();
         self.state
@@ -958,6 +1045,7 @@ impl OpVisitor for InterpreterVisitor<'_> {
             .set_f32(f32::from_ne_bytes(val.to_ne_bytes()));
         Continuation::Continue
     }
+
     fn bitcast_float_from_int_64(&mut self, dst: FReg, src: XReg) -> Self::Return {
         let val = self.state.x(src).get_u64();
         self.state

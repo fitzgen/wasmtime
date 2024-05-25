@@ -182,6 +182,46 @@ fn pbc64_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
             collector.reg_use(c);
         }
 
+        Inst::BrIfXeq32 {
+            src1,
+            src2,
+            taken: _,
+            not_taken: _,
+        }
+        | Inst::BrIfXneq32 {
+            src1,
+            src2,
+            taken: _,
+            not_taken: _,
+        }
+        | Inst::BrIfXslt32 {
+            src1,
+            src2,
+            taken: _,
+            not_taken: _,
+        }
+        | Inst::BrIfXslteq32 {
+            src1,
+            src2,
+            taken: _,
+            not_taken: _,
+        }
+        | Inst::BrIfXult32 {
+            src1,
+            src2,
+            taken: _,
+            not_taken: _,
+        }
+        | Inst::BrIfXulteq32 {
+            src1,
+            src2,
+            taken: _,
+            not_taken: _,
+        } => {
+            collector.reg_use(src1);
+            collector.reg_use(src2);
+        }
+
         Inst::Xmov { dst, src } => todo!(),
         Inst::Fmov { dst, src } => todo!(),
         Inst::Vmov { dst, src } => todo!(),
@@ -298,7 +338,13 @@ impl MachInst for Inst {
         match self {
             Inst::Ret { .. } | Inst::Rets { .. } => MachTerminator::Ret,
             Inst::Jump { .. } => MachTerminator::Uncond,
-            Inst::BrIf { .. } => MachTerminator::Cond,
+            Inst::BrIf { .. }
+            | Inst::BrIfXeq32 { .. }
+            | Inst::BrIfXneq32 { .. }
+            | Inst::BrIfXslt32 { .. }
+            | Inst::BrIfXslteq32 { .. }
+            | Inst::BrIfXult32 { .. }
+            | Inst::BrIfXulteq32 { .. } => MachTerminator::Cond,
             _ => MachTerminator::None,
         }
     }
@@ -371,17 +417,18 @@ impl MachInst for Inst {
     }
 
     fn worst_case_size() -> CodeOffset {
-        // `BrIf { c, taken, not_taken }` expands to `br_if c, taken; jump not_taken`.
+        // `BrIfXeq32 { a, b, taken, not_taken }` expands to `br_if_xeq32 a, b, taken; jump not_taken`.
         //
-        // The first instruction is six bytes long:
+        // The first instruction is seven bytes long:
         //   * 1 byte opcode
-        //   * 1 byte `c` register encoding
+        //   * 1 byte `a` register encoding
+        //   * 1 byte `b` register encoding
         //   * 4 byte `taken` displacement
         //
         // And the second instruction is five bytes long:
         //   * 1 byte opcode
         //   * 4 byte `not_taken` displacement
-        11
+        12
     }
 
     fn ref_type_regclass(_settings: &settings::Flags) -> RegClass {
@@ -531,6 +578,79 @@ impl Inst {
                 let taken = taken.to_string();
                 let not_taken = not_taken.to_string();
                 format!("br_if {c}, {taken}; jump {not_taken}")
+            }
+
+            Inst::BrIfXeq32 {
+                src1,
+                src2,
+                taken,
+                not_taken,
+            } => {
+                let src1 = format_reg(**src1, allocs);
+                let src2 = format_reg(**src2, allocs);
+                let taken = taken.to_string();
+                let not_taken = not_taken.to_string();
+                format!("br_if_xeq32 {src1}, {src2}, {taken}; jump {not_taken}")
+            }
+            Inst::BrIfXneq32 {
+                src1,
+                src2,
+                taken,
+                not_taken,
+            } => {
+                let src1 = format_reg(**src1, allocs);
+                let src2 = format_reg(**src2, allocs);
+                let taken = taken.to_string();
+                let not_taken = not_taken.to_string();
+                format!("br_if_xneq32 {src1}, {src2}, {taken}; jump {not_taken}")
+            }
+            Inst::BrIfXslt32 {
+                src1,
+                src2,
+                taken,
+                not_taken,
+            } => {
+                let src1 = format_reg(**src1, allocs);
+                let src2 = format_reg(**src2, allocs);
+                let taken = taken.to_string();
+                let not_taken = not_taken.to_string();
+                format!("br_if_xslt32 {src1}, {src2}, {taken}; jump {not_taken}")
+            }
+            Inst::BrIfXslteq32 {
+                src1,
+                src2,
+                taken,
+                not_taken,
+            } => {
+                let src1 = format_reg(**src1, allocs);
+                let src2 = format_reg(**src2, allocs);
+                let taken = taken.to_string();
+                let not_taken = not_taken.to_string();
+                format!("br_if_xslteq32 {src1}, {src2}, {taken}; jump {not_taken}")
+            }
+            Inst::BrIfXult32 {
+                src1,
+                src2,
+                taken,
+                not_taken,
+            } => {
+                let src1 = format_reg(**src1, allocs);
+                let src2 = format_reg(**src2, allocs);
+                let taken = taken.to_string();
+                let not_taken = not_taken.to_string();
+                format!("br_if_xult32 {src1}, {src2}, {taken}; jump {not_taken}")
+            }
+            Inst::BrIfXulteq32 {
+                src1,
+                src2,
+                taken,
+                not_taken,
+            } => {
+                let src1 = format_reg(**src1, allocs);
+                let src2 = format_reg(**src2, allocs);
+                let taken = taken.to_string();
+                let not_taken = not_taken.to_string();
+                format!("br_if_xulteq32 {src1}, {src2}, {taken}; jump {not_taken}")
             }
 
             Inst::Xmov { dst, src } => todo!(),

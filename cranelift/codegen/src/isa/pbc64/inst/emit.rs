@@ -201,6 +201,192 @@ fn pbc64_emit(
             enc::jump(sink, 0x00000000);
         }
 
+        Inst::BrIfXeq32 {
+            src1,
+            src2,
+            taken,
+            not_taken,
+        } => {
+            // If taken.
+            let taken_start = start_offset + 3;
+            let taken_end = taken_start + 4;
+
+            sink.use_label_at_offset(taken_start, *taken, LabelUse::Jump(3));
+            let mut inverted = SmallVec::<[u8; 16]>::new();
+            enc::br_if_xneq32(&mut inverted, src1, src2, 0x00000000);
+            debug_assert_eq!(
+                inverted.len(),
+                usize::try_from(taken_end - start_offset).unwrap()
+            );
+
+            sink.add_cond_branch(start_offset, taken_end, *taken, &inverted);
+            enc::br_if_xeq32(sink, src1, src2, 0x00000000);
+            debug_assert_eq!(sink.cur_offset(), taken_end);
+
+            // If not taken.
+            let not_taken_start = taken_end + 1;
+            let not_taken_end = not_taken_start + 4;
+
+            sink.use_label_at_offset(not_taken_start, *not_taken, LabelUse::Jump(1));
+            sink.add_uncond_branch(taken_end, not_taken_end, *not_taken);
+            enc::jump(sink, 0x00000000);
+        }
+
+        Inst::BrIfXneq32 {
+            src1,
+            src2,
+            taken,
+            not_taken,
+        } => {
+            // If taken.
+            let taken_start = start_offset + 3;
+            let taken_end = taken_start + 4;
+
+            sink.use_label_at_offset(taken_start, *taken, LabelUse::Jump(3));
+            let mut inverted = SmallVec::<[u8; 16]>::new();
+            enc::br_if_xeq32(&mut inverted, src1, src2, 0x00000000);
+            debug_assert_eq!(
+                inverted.len(),
+                usize::try_from(taken_end - start_offset).unwrap()
+            );
+
+            sink.add_cond_branch(start_offset, taken_end, *taken, &inverted);
+            enc::br_if_xneq32(sink, src1, src2, 0x00000000);
+            debug_assert_eq!(sink.cur_offset(), taken_end);
+
+            // If not taken.
+            let not_taken_start = taken_end + 1;
+            let not_taken_end = not_taken_start + 4;
+
+            sink.use_label_at_offset(not_taken_start, *not_taken, LabelUse::Jump(1));
+            sink.add_uncond_branch(taken_end, not_taken_end, *not_taken);
+            enc::jump(sink, 0x00000000);
+        }
+
+        Inst::BrIfXslt32 {
+            src1,
+            src2,
+            taken,
+            not_taken,
+        } => {
+            // If taken.
+            let taken_start = start_offset + 3;
+            let taken_end = taken_start + 4;
+
+            sink.use_label_at_offset(taken_start, *taken, LabelUse::Jump(3));
+            let mut inverted = SmallVec::<[u8; 16]>::new();
+            enc::br_if_xslteq32(&mut inverted, src2, src1, 0x00000000);
+            debug_assert_eq!(
+                inverted.len(),
+                usize::try_from(taken_end - start_offset).unwrap()
+            );
+
+            sink.add_cond_branch(start_offset, taken_end, *taken, &inverted);
+            enc::br_if_xslt32(sink, src1, src2, 0x00000000);
+            debug_assert_eq!(sink.cur_offset(), taken_end);
+
+            // If not taken.
+            let not_taken_start = taken_end + 1;
+            let not_taken_end = not_taken_start + 4;
+
+            sink.use_label_at_offset(not_taken_start, *not_taken, LabelUse::Jump(1));
+            sink.add_uncond_branch(taken_end, not_taken_end, *not_taken);
+            enc::jump(sink, 0x00000000);
+        }
+
+        Inst::BrIfXslteq32 {
+            src1,
+            src2,
+            taken,
+            not_taken,
+        } => {
+            // If taken.
+            let taken_start = start_offset + 3;
+            let taken_end = taken_start + 4;
+
+            sink.use_label_at_offset(taken_start, *taken, LabelUse::Jump(3));
+            let mut inverted = SmallVec::<[u8; 16]>::new();
+            enc::br_if_xslt32(&mut inverted, src2, src1, 0x00000000);
+            debug_assert_eq!(
+                inverted.len(),
+                usize::try_from(taken_end - start_offset).unwrap()
+            );
+
+            sink.add_cond_branch(start_offset, taken_end, *taken, &inverted);
+            enc::br_if_xslteq32(sink, src1, src2, 0x00000000);
+            debug_assert_eq!(sink.cur_offset(), taken_end);
+
+            // If not taken.
+            let not_taken_start = taken_end + 1;
+            let not_taken_end = not_taken_start + 4;
+
+            sink.use_label_at_offset(not_taken_start, *not_taken, LabelUse::Jump(1));
+            sink.add_uncond_branch(taken_end, not_taken_end, *not_taken);
+            enc::jump(sink, 0x00000000);
+        }
+
+        Inst::BrIfXult32 {
+            src1,
+            src2,
+            taken,
+            not_taken,
+        } => {
+            // If taken.
+            let taken_start = start_offset + 3;
+            let taken_end = taken_start + 4;
+
+            sink.use_label_at_offset(taken_start, *taken, LabelUse::Jump(3));
+            let mut inverted = SmallVec::<[u8; 16]>::new();
+            enc::br_if_xulteq32(&mut inverted, src2, src1, 0x00000000);
+            debug_assert_eq!(
+                inverted.len(),
+                usize::try_from(taken_end - start_offset).unwrap()
+            );
+
+            sink.add_cond_branch(start_offset, taken_end, *taken, &inverted);
+            enc::br_if_xult32(sink, src1, src2, 0x00000000);
+            debug_assert_eq!(sink.cur_offset(), taken_end);
+
+            // If not taken.
+            let not_taken_start = taken_end + 1;
+            let not_taken_end = not_taken_start + 4;
+
+            sink.use_label_at_offset(not_taken_start, *not_taken, LabelUse::Jump(1));
+            sink.add_uncond_branch(taken_end, not_taken_end, *not_taken);
+            enc::jump(sink, 0x00000000);
+        }
+
+        Inst::BrIfXulteq32 {
+            src1,
+            src2,
+            taken,
+            not_taken,
+        } => {
+            // If taken.
+            let taken_start = start_offset + 3;
+            let taken_end = taken_start + 4;
+
+            sink.use_label_at_offset(taken_start, *taken, LabelUse::Jump(3));
+            let mut inverted = SmallVec::<[u8; 16]>::new();
+            enc::br_if_xult32(&mut inverted, src2, src1, 0x00000000);
+            debug_assert_eq!(
+                inverted.len(),
+                usize::try_from(taken_end - start_offset).unwrap()
+            );
+
+            sink.add_cond_branch(start_offset, taken_end, *taken, &inverted);
+            enc::br_if_xulteq32(sink, src1, src2, 0x00000000);
+            debug_assert_eq!(sink.cur_offset(), taken_end);
+
+            // If not taken.
+            let not_taken_start = taken_end + 1;
+            let not_taken_end = not_taken_start + 4;
+
+            sink.use_label_at_offset(not_taken_start, *not_taken, LabelUse::Jump(1));
+            sink.add_uncond_branch(taken_end, not_taken_end, *not_taken);
+            enc::jump(sink, 0x00000000);
+        }
+
         Inst::Xmov { dst, src } => enc::xmov(sink, dst, src),
         Inst::Fmov { dst, src } => todo!(),
         Inst::Vmov { dst, src } => todo!(),
