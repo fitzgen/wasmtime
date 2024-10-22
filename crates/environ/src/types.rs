@@ -784,6 +784,26 @@ impl TypeTrace for WasmStorageType {
     }
 }
 
+impl WasmStorageType {
+    /// Is this an `i8` type?
+    #[inline]
+    pub fn is_i8(self) -> bool {
+        matches!(self, Self::I8)
+    }
+
+    /// Is this an `i16` type?
+    #[inline]
+    pub fn is_i16(self) -> bool {
+        matches!(self, Self::I16)
+    }
+
+    /// Is this a value type?
+    #[inline]
+    pub fn is_val(self) -> bool {
+        matches!(self, Self::Val(_))
+    }
+}
+
 /// The type of a struct field or array element.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct WasmFieldType {

@@ -24,6 +24,7 @@ tempfile = "3.3.0"
 wasmparser = { workspace = true }
 wasmprinter = { workspace = true }
 wasmtime = { workspace = true, features = ['default', 'winch', 'gc', 'memory-protection-keys'] }
+wasmtime-environ = { workspace = true }
 wasmtime-wast = { workspace = true }
 wasm-encoder = { workspace = true }
 wasm-smith = { workspace = true }
@@ -31,6 +32,8 @@ wasm-mutate = { workspace = true }
 wasm-spec-interpreter = { path = "./wasm-spec-interpreter", optional = true }
 wasmi = "0.39.1"
 futures = { workspace = true }
+mutatis = { path = "../../../mutatis", features = ["derive", "std"] }
+
 
 # We rely on precompiled v8 binaries, but rusty-v8 doesn't have a precompiled
 # binary for MinGW which is built on our CI. It does have one for Windows-msvc,

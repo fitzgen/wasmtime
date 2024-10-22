@@ -2087,6 +2087,22 @@ dependencies = [
  "num-integer",
  "num-traits",
  "rawpointer",
+
+[[package]]
+name = "mutatis"
+version = "0.3.0"
+dependencies = [
+ "mutatis-derive",
+ "rand",
+]
+
+[[package]]
+name = "mutatis-derive"
+version = "0.3.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.60",
 ]
 
 [[package]]
@@ -4194,6 +4210,7 @@ dependencies = [
  "env_logger 0.11.5",
  "futures",
  "log",
+ "mutatis",
  "rand",
  "rayon",
  "target-lexicon",
@@ -4207,6 +4224,7 @@ dependencies = [
  "wasmparser",
  "wasmprinter",
  "wasmtime",
+ "wasmtime-environ",
  "wasmtime-wast",
  "wat",
 ]

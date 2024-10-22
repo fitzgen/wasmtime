@@ -13,6 +13,7 @@ mod async_config;
 mod codegen_settings;
 pub mod component_types;
 mod config;
+mod gc_ops;
 mod instance_allocation_strategy;
 mod memory;
 mod module;
@@ -27,6 +28,7 @@ pub use async_config::AsyncConfig;
 pub use codegen_settings::CodegenSettings;
 pub use config::CompilerStrategy;
 pub use config::{Config, WasmtimeConfig};
+pub use gc_ops::*;
 pub use instance_allocation_strategy::InstanceAllocationStrategy;
 pub use memory::{
     HeapImage, MemoryAccesses, MemoryConfig, NormalMemoryConfig, UnalignedMemory,
