@@ -7,11 +7,13 @@
 use crate::prelude::*;
 use crate::runtime::vm::vmcontext::{VMFuncRef, VMTableDefinition};
 use crate::runtime::vm::{GcStore, SendSyncPtr, VMGcRef, VMStore};
+use core::alloc::Layout;
 use core::ops::Range;
 use core::ptr::{self, NonNull};
 use core::slice;
 use core::{cmp, usize};
 use sptr::Strict;
+use wasmtime_environ::core::mem;
 use wasmtime_environ::{
     IndexType, Trap, Tunables, WasmHeapTopType, WasmRefType, FUNCREF_INIT_BIT, FUNCREF_MASK,
 };
@@ -267,6 +269,10 @@ fn wasm_to_table_type(ty: WasmRefType) -> TableElementType {
     }
 }
 
+unsafe fn alloc_zeroed_vec<T>(len: usize) -> Result<Vec<T>> {
+    todo!()
+}
+
 impl Table {
     /// Create a new dynamic (movable) table instance for the specified table plan.
     pub fn new_dynamic(
@@ -277,7 +283,22 @@ impl Table {
         let (minimum, maximum) = Self::limit_new(ty, store)?;
         match wasm_to_table_type(ty.ref_type) {
             TableElementType::Func => Ok(Self::from(DynamicFuncTable {
-                elements: vec![None; minimum],
+                elements: unsafe {
+                    debug_assert!(
+                        core::mem::MaybeUninit::<FuncTableElem>::zeroed()
+                            .assume_init()
+                            .is_none(),
+                        "null table elements are represented with zeroed memory"
+                    );
+                    let align = mem::align_of::<FuncTableElem>();
+                    let size = mem::size_of::<FuncTableElem>();
+                    let size = size.next_multiple_of(align);
+                    let size = size.checked_mul(minimum).unwrap();
+                    let layout = Layout::from_size_align(size, align)?;
+                    let ptr = alloc::alloc::alloc_zeroed(layout);
+                    ensure!(!ptr.is_null(), "failed to allocate memory for table");
+                    Vec::from_raw_parts(ptr, minimum, minimum)
+                },
                 maximum,
                 lazy_init: tunables.table_lazy_init,
             })),
