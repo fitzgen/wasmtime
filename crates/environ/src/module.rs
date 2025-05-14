@@ -349,6 +349,22 @@ pub struct Module {
     /// Types of functions, imported and local.
     pub functions: PrimaryMap<FuncIndex, FunctionType>,
 
+    /// TODO FITZGEN
+    ///
+    // TODO FITZGEN: define some kind of thing like
+    //
+    // ```
+    // struct CompileTimeBuiltins {
+    //     builtins: PrimaryMap<CompileTimeBuiltin, CompileTimeBuiltinData>,
+    //     defined: BTreeMap<String, BTreeMap<String, CompileTimeBuiltin>>,
+    // }
+    // ```
+    //
+    // and then use that inside `CodeBuilder` and also here. should help avoid
+    // cloning the `CompileTimeBuiltinData` and also give us a proper name so we
+    // don't have to import `BTreeMap` all over the place.
+    pub compile_time_builtins: BTreeMap<FuncIndex, CompileTimeBuiltinData>,
+
     /// WebAssembly tables.
     pub tables: PrimaryMap<TableIndex, Table>,
 
@@ -621,6 +637,7 @@ impl TypeTrace for Module {
             num_escaped_funcs: _,
             needs_gc_heap: _,
             functions,
+            compile_time_builtins: _,
             tables,
             memories: _,
             globals,
@@ -671,6 +688,7 @@ impl TypeTrace for Module {
             num_escaped_funcs: _,
             needs_gc_heap: _,
             functions,
+            compile_time_builtins: _,
             tables,
             memories: _,
             globals,

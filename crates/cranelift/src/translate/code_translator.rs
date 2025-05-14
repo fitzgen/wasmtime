@@ -628,22 +628,25 @@ pub fn translate_operator(
                 builder,
             );
 
-            let call = environ.translate_call(
+            let num_expected_results = builder.func.dfg.signatures
+                [builder.func.dfg.ext_funcs[fref].signature]
+                .returns
+                .len();
+
+            let inst_results = environ.translate_call(
                 builder,
                 FuncIndex::from_u32(*function_index),
                 fref,
                 args,
             )?;
-            let inst_results = builder.inst_results(call);
+
             debug_assert_eq!(
                 inst_results.len(),
-                builder.func.dfg.signatures[builder.func.dfg.ext_funcs[fref].signature]
-                    .returns
-                    .len(),
+                num_expected_results,
                 "translate_call results should match the call signature"
             );
             state.popn(num_args);
-            state.pushn(inst_results);
+            state.pushn(&inst_results);
         }
         Operator::CallIndirect {
             type_index,

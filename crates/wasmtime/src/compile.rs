@@ -35,6 +35,7 @@ use std::{
 
 #[cfg(feature = "component-model")]
 use wasmtime_environ::component::Translator;
+use wasmtime_environ::CompileTimeBuiltinData;
 use wasmtime_environ::CompiledFunctionBody;
 use wasmtime_environ::{
     BuiltinFunctionIndex, CompiledFunctionInfo, CompiledModuleInfo, Compiler, DefinedFuncIndex,
@@ -68,6 +69,7 @@ pub(crate) fn build_artifacts<T: FinishedObject>(
     engine: &Engine,
     wasm: &[u8],
     dwarf_package: Option<&[u8]>,
+    compile_time_builtins: &BTreeMap<(String, String), CompileTimeBuiltinData>,
     obj_state: &T::State,
 ) -> Result<(T, Option<(CompiledModuleInfo, ModuleTypes)>)> {
     let tunables = engine.tunables();
@@ -80,9 +82,10 @@ pub(crate) fn build_artifacts<T: FinishedObject>(
     let mut validator = wasmparser::Validator::new_with_features(engine.features());
     parser.set_features(*validator.features());
     let mut types = ModuleTypesBuilder::new(&validator);
-    let mut translation = ModuleEnvironment::new(tunables, &mut validator, &mut types)
-        .translate(parser, wasm)
-        .context("failed to parse WebAssembly module")?;
+    let mut translation =
+        ModuleEnvironment::new(tunables, compile_time_builtins, &mut validator, &mut types)
+            .translate(parser, wasm)
+            .context("failed to parse WebAssembly module")?;
     let functions = mem::take(&mut translation.function_body_inputs);
 
     let compile_inputs = CompileInputs::for_module(&types, &translation, functions);
@@ -138,6 +141,7 @@ pub(crate) fn build_component_artifacts<T: FinishedObject>(
     engine: &Engine,
     binary: &[u8],
     _dwarf_package: Option<&[u8]>,
+    _compile_time_builtins: &BTreeMap<(String, String), CompileTimeBuiltinData>,
     obj_state: &T::State,
 ) -> Result<(T, Option<wasmtime_environ::component::ComponentArtifacts>)> {
     use wasmtime_environ::component::{
@@ -521,6 +525,17 @@ impl<'a> CompileInputs<'a> {
                         })
                     });
                 }
+            }
+
+            // TODO FITZGEN: compile a standalone function for this builtin for
+            // in case it is re-exported or `ref.func`ed. Probably also need
+            // trampolines too.
+            for (func, builtin) in &translation.module.compile_time_builtins {
+                debug_assert!(
+                    translation.module.functions[*func].is_escaping(),
+                    "compile-time builtins are function imports at the Wasm level, and imported \
+                     functions always escape",
+                );
             }
         }
 

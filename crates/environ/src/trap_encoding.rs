@@ -21,7 +21,9 @@ pub struct TrapInformation {
 //
 // These need to be kept in sync.
 #[non_exhaustive]
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+#[derive(
+    Clone, Copy, PartialEq, Eq, Debug, Hash, serde_derive::Serialize, serde_derive::Deserialize,
+)]
 #[expect(missing_docs, reason = "self-describing variants")]
 pub enum Trap {
     /// The current stack space was exhausted.

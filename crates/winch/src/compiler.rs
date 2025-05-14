@@ -96,6 +96,12 @@ impl wasmtime_environ::Compiler for Compiler {
         data: FunctionBodyData<'_>,
         types: &ModuleTypesBuilder,
     ) -> Result<CompiledFunctionBody, CompileError> {
+        if !translation.module.compile_time_builtins.is_empty() {
+            return Err(CompileError::Codegen(
+                "Winch does not support compile-time builtins yet".into(),
+            ));
+        }
+
         let index = translation.module.func_index(index);
         let sig = translation.module.functions[index]
             .signature

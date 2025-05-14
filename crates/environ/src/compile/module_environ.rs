@@ -2,7 +2,7 @@ use crate::module::{
     FuncRefIndex, Initializer, MemoryInitialization, MemoryInitializer, Module, TableSegment,
     TableSegmentElements,
 };
-use crate::prelude::*;
+use crate::{prelude::*, CompileTimeBuiltinData};
 use crate::{
     ConstExpr, ConstOp, DataIndex, DefinedFuncIndex, ElemIndex, EngineOrModuleTypeIndex,
     EntityIndex, EntityType, FuncIndex, GlobalIndex, IndexType, InitMemory, MemoryIndex,
@@ -13,7 +13,7 @@ use crate::{
 use anyhow::{bail, Result};
 use cranelift_entity::packed_option::ReservedValue;
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::mem;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -34,6 +34,9 @@ pub struct ModuleEnvironment<'a, 'data> {
     // Various bits and pieces of configuration
     validator: &'a mut Validator,
     tunables: &'a Tunables,
+
+    /// TODO FITZGEN
+    compile_time_builtins: &'a BTreeMap<(String, String), CompileTimeBuiltinData>,
 }
 
 /// The result of translating via `ModuleEnvironment`. Function bodies are not
@@ -164,6 +167,7 @@ impl<'a, 'data> ModuleEnvironment<'a, 'data> {
     /// Allocates the environment data structures.
     pub fn new(
         tunables: &'a Tunables,
+        compile_time_builtins: &'a BTreeMap<(String, String), CompileTimeBuiltinData>,
         validator: &'a mut Validator,
         types: &'a mut ModuleTypesBuilder,
     ) -> Self {
@@ -171,6 +175,7 @@ impl<'a, 'data> ModuleEnvironment<'a, 'data> {
             result: ModuleTranslation::default(),
             types,
             tunables,
+            compile_time_builtins,
             validator,
         }
     }
@@ -298,35 +303,61 @@ impl<'a, 'data> ModuleEnvironment<'a, 'data> {
 
                 for entry in imports {
                     let import = entry?;
-                    let ty = match import.ty {
+                    let (ty, is_builtin) = match import.ty {
                         TypeRef::Func(index) => {
                             let index = TypeIndex::from_u32(index);
                             let interned_index = self.result.module.types[index];
                             self.result.module.num_imported_funcs += 1;
                             self.result.debuginfo.wasm_file.imported_func_count += 1;
-                            EntityType::Function(interned_index)
+
+                            let is_builtin = self
+                                .compile_time_builtins
+                                // TODO FITZGEN: change to nested maps to avoid
+                                // these allocations.
+                                .contains_key(&(
+                                    import.module.to_string(),
+                                    import.name.to_string(),
+                                ));
+
+                            (EntityType::Function(interned_index), is_builtin)
                         }
                         TypeRef::Memory(ty) => {
                             self.result.module.num_imported_memories += 1;
-                            EntityType::Memory(ty.into())
+                            (EntityType::Memory(ty.into()), false)
                         }
                         TypeRef::Global(ty) => {
                             self.result.module.num_imported_globals += 1;
-                            EntityType::Global(self.convert_global_type(&ty)?)
+                            (EntityType::Global(self.convert_global_type(&ty)?), false)
                         }
                         TypeRef::Table(ty) => {
                             self.result.module.num_imported_tables += 1;
-                            EntityType::Table(self.convert_table_type(&ty)?)
+                            (EntityType::Table(self.convert_table_type(&ty)?), false)
                         }
                         TypeRef::Tag(ty) => {
                             let index = TypeIndex::from_u32(ty.func_type_idx);
                             let signature = self.result.module.types[index];
                             let tag = Tag { signature };
                             self.result.module.num_imported_tags += 1;
-                            EntityType::Tag(tag)
+                            (EntityType::Tag(tag), false)
                         }
                     };
-                    self.declare_import(import.module, import.name, ty);
+
+                    if is_builtin {
+                        // TODO FITZGEN: type check that the builtin's type
+                        // matches the import's type.
+
+                        let index = self.push_type(ty);
+                        let EntityIndex::Function(func_index) = index else {
+                            unreachable!()
+                        };
+                        self.flag_func_as_builtin(
+                            func_index,
+                            import.module.to_string(),
+                            import.name.to_string(),
+                        );
+                    } else {
+                        self.declare_import(import.module, import.name, ty);
+                    }
                 }
             }
 
@@ -751,13 +782,19 @@ and for re-adding support for interface types you can see this issue:
     /// When the module linking proposal is disabled, however, disregard this
     /// logic and instead work directly with two-level imports since no
     /// instances are defined.
-    fn declare_import(&mut self, module: &'data str, field: &'data str, ty: EntityType) {
+    fn declare_import(
+        &mut self,
+        module: &'data str,
+        field: &'data str,
+        ty: EntityType,
+    ) -> EntityIndex {
         let index = self.push_type(ty);
         self.result.module.initializers.push(Initializer::Import {
             name: module.to_owned(),
             field: field.to_owned(),
             index,
         });
+        index
     }
 
     fn push_type(&mut self, ty: EntityType) -> EntityIndex {
@@ -788,6 +825,15 @@ and for re-adding support for interface types you can see this issue:
         let index = self.result.module.num_escaped_funcs as u32;
         ty.func_ref = FuncRefIndex::from_u32(index);
         self.result.module.num_escaped_funcs += 1;
+    }
+
+    fn flag_func_as_builtin(&mut self, func: FuncIndex, module: String, name: String) {
+        let old_entry = self
+            .result
+            .module
+            .compile_time_builtins
+            .insert(func, self.compile_time_builtins[&(module, name)].clone());
+        assert!(old_entry.is_none());
     }
 
     /// Parses the Name section of the wasm module.

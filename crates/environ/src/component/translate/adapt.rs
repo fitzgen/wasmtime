@@ -118,6 +118,7 @@
 use crate::component::translate::*;
 use crate::fact;
 use crate::EntityType;
+use std::collections::BTreeMap;
 use std::collections::HashSet;
 
 /// Metadata information about a fused adapter.
@@ -218,6 +219,7 @@ impl<'data> Translator<'_, 'data> {
             self.validator.reset();
             let translation = ModuleEnvironment::new(
                 self.tunables,
+                &BTreeMap::default(),
                 &mut self.validator,
                 self.types.module_types_builder(),
             )

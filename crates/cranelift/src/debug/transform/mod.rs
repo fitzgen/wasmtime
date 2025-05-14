@@ -7,7 +7,10 @@ use crate::debug::Compilation;
 use anyhow::Error;
 use cranelift_codegen::isa::TargetIsa;
 use gimli::{write, Dwarf, DwarfPackage, LittleEndian, Section, Unit, UnitSectionOffset};
-use std::{collections::HashSet, fmt::Debug};
+use std::{
+    collections::{BTreeMap, HashSet},
+    fmt::Debug,
+};
 use synthetic::ModuleSyntheticUnit;
 use thiserror::Error;
 use wasmtime_environ::{
@@ -121,16 +124,20 @@ fn read_dwarf_package_from_bytes<'data>(
     let mut validator = wasmparser::Validator::new();
     let parser = wasmparser::Parser::new(0);
     let mut types = wasmtime_environ::ModuleTypesBuilder::new(&validator);
-    let translation =
-        match wasmtime_environ::ModuleEnvironment::new(tunables, &mut validator, &mut types)
-            .translate(parser, dwp_bytes)
-        {
-            Ok(translation) => translation,
-            Err(e) => {
-                log::warn!("failed to parse wasm dwarf package: {e:?}");
-                return None;
-            }
-        };
+    let translation = match wasmtime_environ::ModuleEnvironment::new(
+        tunables,
+        &BTreeMap::default(),
+        &mut validator,
+        &mut types,
+    )
+    .translate(parser, dwp_bytes)
+    {
+        Ok(translation) => translation,
+        Err(e) => {
+            log::warn!("failed to parse wasm dwarf package: {e:?}");
+            return None;
+        }
+    };
 
     match load_dwp(translation, buffer) {
         Ok(package) => Some(package),

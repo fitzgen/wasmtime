@@ -9,6 +9,7 @@ use crate::{
 use anyhow::anyhow;
 use anyhow::{bail, Result};
 use indexmap::IndexMap;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::mem;
 use wasmparser::component_types::{
@@ -840,6 +841,7 @@ impl<'a, 'data> Translator<'a, 'data> {
                 self.validator.module_section(&unchecked_range)?;
                 let translation = ModuleEnvironment::new(
                     self.tunables,
+                    &BTreeMap::default(),
                     self.validator,
                     self.types.module_types_builder(),
                 )

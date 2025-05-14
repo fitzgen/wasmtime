@@ -4,8 +4,9 @@ use crate::prelude::*;
 use crate::runtime::vm::MmapVec;
 use crate::{CodeBuilder, CodeMemory, Engine, Module};
 use object::write::WritableBuffer;
+use std::collections::BTreeMap;
 use std::sync::Arc;
-use wasmtime_environ::{FinishedObject, ObjectBuilder};
+use wasmtime_environ::{CompileTimeBuiltinData, FinishedObject, ObjectBuilder};
 
 impl<'a> CodeBuilder<'a> {
     fn compile_cached<T, S>(
@@ -14,12 +15,14 @@ impl<'a> CodeBuilder<'a> {
             &Engine,
             &[u8],
             Option<&[u8]>,
+            &BTreeMap<(String, String), CompileTimeBuiltinData>,
             &S,
         ) -> Result<(MmapVecWrapper, Option<T>)>,
         state: &S,
     ) -> Result<(Arc<CodeMemory>, Option<T>)> {
         let wasm = self.get_wasm()?;
         let dwarf_package = self.get_dwarf_package();
+        let compile_time_builtins = &self.compile_time_builtins;
 
         self.engine
             .check_compatible_with_native_host()
@@ -31,6 +34,7 @@ impl<'a> CodeBuilder<'a> {
                 crate::compile::HashedEngineCompileEnv(self.engine),
                 &wasm,
                 &dwarf_package,
+                compile_time_builtins,
                 // Don't hash this as it's just its own "pure" function pointer.
                 NotHashed(build_artifacts),
                 // Don't hash the FinishedObject state: this contains
@@ -43,22 +47,31 @@ impl<'a> CodeBuilder<'a> {
                     .get_data_raw(
                         &state,
                         // Cache miss, compute the actual artifacts
-                        |(engine, wasm, dwarf_package, build_artifacts, state)| -> Result<_> {
+                        |(
+                            engine,
+                            wasm,
+                            dwarf_package,
+                            compile_time_builtins,
+                            build_artifacts,
+                            state,
+                        )|
+                         -> Result<_> {
                             let (mmap, info) = (build_artifacts.0)(
                                 engine.0,
                                 wasm,
                                 dwarf_package.as_deref(),
+                                compile_time_builtins,
                                 state.0,
                             )?;
                             let code = publish_mmap(engine.0, mmap.0)?;
                             Ok((code, info))
                         },
                         // Implementation of how to serialize artifacts
-                        |(_engine, _wasm, _, _, _), (code, _info_and_types)| {
+                        |(_engine, _wasm, _, _, _, _), (code, _info_and_types)| {
                             Some(code.mmap().to_vec())
                         },
                         // Cache hit, deserialize the provided artifacts
-                        |(engine, wasm, _, _, _), serialized_bytes| {
+                        |(engine, wasm, _, _, _, _), serialized_bytes| {
                             let kind = if wasmparser::Parser::is_component(&wasm) {
                                 wasmtime_environ::ObjectKind::Component
                             } else {
@@ -79,8 +92,13 @@ impl<'a> CodeBuilder<'a> {
 
         #[cfg(not(feature = "cache"))]
         {
-            let (mmap, info_and_types) =
-                build_artifacts(self.engine, &wasm, dwarf_package.as_deref(), state)?;
+            let (mmap, info_and_types) = build_artifacts(
+                self.engine,
+                &wasm,
+                dwarf_package.as_deref(),
+                compile_time_builtins,
+                state,
+            )?;
             let code = publish_mmap(self.engine, mmap.0)?;
             return Ok((code, info_and_types));
         }

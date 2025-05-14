@@ -18,14 +18,15 @@ use cranelift_entity::{EntityRef, PrimaryMap, SecondaryMap};
 use cranelift_frontend::Variable;
 use cranelift_frontend::{FuncInstBuilder, FunctionBuilder};
 use smallvec::SmallVec;
+use std::borrow::Cow;
 use std::mem;
 use wasmparser::{Operator, WasmFeatures};
 use wasmtime_environ::{
-    BuiltinFunctionIndex, DataIndex, ElemIndex, EngineOrModuleTypeIndex, FuncIndex, GlobalIndex,
-    IndexType, Memory, MemoryIndex, Module, ModuleInternedTypeIndex, ModuleTranslation,
-    ModuleTypesBuilder, PtrSize, Table, TableIndex, TripleExt, Tunables, TypeConvert, TypeIndex,
-    VMOffsets, WasmCompositeInnerType, WasmFuncType, WasmHeapTopType, WasmHeapType, WasmRefType,
-    WasmResult, WasmValType,
+    BuiltinFunctionIndex, CompileTimeBuiltinData, CompileTimeBuiltinValue, DataIndex, ElemIndex,
+    EngineOrModuleTypeIndex, FuncIndex, GlobalIndex, IndexType, Memory, MemoryIndex, Module,
+    ModuleInternedTypeIndex, ModuleTranslation, ModuleTypesBuilder, PtrSize, Table, TableIndex,
+    TripleExt, Tunables, TypeConvert, TypeIndex, VMOffsets, WasmCompositeInnerType, WasmFuncType,
+    WasmHeapTopType, WasmHeapType, WasmRefType, WasmResult, WasmValType,
 };
 use wasmtime_environ::{FUNCREF_INIT_BIT, FUNCREF_MASK};
 
@@ -1245,9 +1246,9 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
     }
 }
 
-struct Call<'a, 'func, 'module_env> {
+struct Call<'a, 'b, 'func, 'module_env> {
     builder: &'a mut FunctionBuilder<'func>,
-    env: &'a mut FuncEnvironment<'module_env>,
+    env: &'b mut FuncEnvironment<'module_env>,
     tail: bool,
 }
 
@@ -1261,11 +1262,11 @@ enum CheckIndirectCallTypeSignature {
     StaticTrap,
 }
 
-impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
+impl<'a, 'b, 'func, 'module_env> Call<'a, 'b, 'func, 'module_env> {
     /// Create a new `Call` site that will do regular, non-tail calls.
     pub fn new(
         builder: &'a mut FunctionBuilder<'func>,
-        env: &'a mut FuncEnvironment<'module_env>,
+        env: &'b mut FuncEnvironment<'module_env>,
     ) -> Self {
         Call {
             builder,
@@ -1277,7 +1278,7 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
     /// Create a new `Call` site that will perform tail calls.
     pub fn new_tail(
         builder: &'a mut FunctionBuilder<'func>,
-        env: &'a mut FuncEnvironment<'module_env>,
+        env: &'b mut FuncEnvironment<'module_env>,
     ) -> Self {
         Call {
             builder,
@@ -1292,7 +1293,7 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
         callee_index: FuncIndex,
         callee: ir::FuncRef,
         call_args: &[ir::Value],
-    ) -> WasmResult<ir::Inst> {
+    ) -> WasmResult<Cow<'a, [ir::Value]>> {
         let mut real_call_args = Vec::with_capacity(call_args.len() + 2);
         let caller_vmctx = self
             .builder
@@ -1302,6 +1303,12 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
 
         // Handle direct calls to locally-defined functions.
         if !self.env.module.is_imported_function(callee_index) {
+            assert!(!self
+                .env
+                .module
+                .compile_time_builtins
+                .contains_key(&callee_index));
+
             // First append the callee vmctx address, which is the same as the caller vmctx in
             // this case.
             real_call_args.push(caller_vmctx);
@@ -1313,7 +1320,13 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
             real_call_args.extend_from_slice(call_args);
 
             // Finally, make the direct call!
-            return Ok(self.direct_call_inst(callee, &real_call_args));
+            let inst = self.direct_call_inst(callee, &real_call_args);
+            return Ok(self.builder.func.dfg.inst_results(inst).into());
+        }
+
+        // Handle direct calls to compile-time builtin imports.
+        if let Some(builtin) = self.env.module.compile_time_builtins.get(&callee_index) {
+            return Ok(Self::inline_builtin(self.builder, builtin, call_args).into());
         }
 
         // Handle direct calls to imported functions. We use an indirect call
@@ -1351,7 +1364,138 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
         real_call_args.extend_from_slice(call_args);
 
         // Finally, make the indirect call!
-        Ok(self.indirect_call_inst(sig_ref, func_addr, &real_call_args))
+        let inst = self.indirect_call_inst(sig_ref, func_addr, &real_call_args);
+        Ok(self.builder.func.dfg.inst_results(inst).into())
+    }
+
+    fn inline_builtin(
+        builder: &'a mut FunctionBuilder<'func>,
+        builtin: &CompileTimeBuiltinData,
+        call_args: &[ir::Value],
+    ) -> Vec<ir::Value> {
+        use wasmtime_environ::CompileTimeBuiltinInst as BuiltinInst;
+        log::trace!("inlining compile-time builtin");
+
+        let mut values = Vec::with_capacity(builtin.body.len());
+
+        let v =
+            |values: &[_], v: CompileTimeBuiltinValue| values[usize::try_from(v.as_u32()).unwrap()];
+
+        let flags = ir::MemFlags::new()
+            .with_notrap()
+            .with_endianness(ir::Endianness::Little);
+
+        for inst in builtin.body.values() {
+            log::trace!("inlining compile-time builtin inst: {inst:?}");
+            values.push(match inst {
+                BuiltinInst::I32Arg { i } | BuiltinInst::I64Arg { i } => {
+                    let i = usize::try_from(*i).unwrap();
+                    call_args[i]
+                }
+                BuiltinInst::I32ZeroExtend { value } => {
+                    let value = v(&values, *value);
+                    debug_assert_eq!(builder.func.dfg.value_type(value), ir::types::I32);
+                    builder.ins().uextend(ir::types::I64, value)
+                }
+                BuiltinInst::I32SignExtend { value } => {
+                    let value = v(&values, *value);
+                    debug_assert_eq!(builder.func.dfg.value_type(value), ir::types::I32);
+                    builder.ins().sextend(ir::types::I64, value)
+                }
+                BuiltinInst::I32Add { lhs, rhs } | BuiltinInst::I64Add { lhs, rhs } => {
+                    let lhs = v(&values, *lhs);
+                    let rhs = v(&values, *rhs);
+                    builder.ins().iadd(lhs, rhs)
+                }
+                BuiltinInst::I32Mul { lhs, rhs } | BuiltinInst::I64Mul { lhs, rhs } => {
+                    let lhs = v(&values, *lhs);
+                    let rhs = v(&values, *rhs);
+                    builder.ins().imul(lhs, rhs)
+                }
+                BuiltinInst::I32UnsignedLessThan { lhs, rhs }
+                | BuiltinInst::I64UnsignedLessThan { lhs, rhs } => {
+                    let lhs = v(&values, *lhs);
+                    let rhs = v(&values, *rhs);
+                    builder
+                        .ins()
+                        .icmp(ir::condcodes::IntCC::UnsignedLessThan, lhs, rhs)
+                }
+                BuiltinInst::TrapIfZero { condition, code } => {
+                    let condition = v(&values, *condition);
+                    builder
+                        .ins()
+                        .trapz(condition, ir::TrapCode::unwrap_user(*code as u8));
+                    condition
+                }
+                BuiltinInst::TrapIfNonZero { condition, code } => {
+                    let condition = v(&values, *condition);
+                    builder
+                        .ins()
+                        .trapnz(condition, ir::TrapCode::unwrap_user(*code as u8));
+                    condition
+                }
+                BuiltinInst::I32SignedLoad8 { addr } => {
+                    let addr = v(&values, *addr);
+                    let value = builder.ins().load(ir::types::I8, flags, addr, 0);
+                    builder.ins().sextend(ir::types::I32, value)
+                }
+                BuiltinInst::I32UnsignedLoad8 { addr } => {
+                    let addr = v(&values, *addr);
+                    let value = builder.ins().load(ir::types::I8, flags, addr, 0);
+                    builder.ins().uextend(ir::types::I32, value)
+                }
+                BuiltinInst::I32SignedLoad16Le { addr } => {
+                    let addr = v(&values, *addr);
+                    let value = builder.ins().load(ir::types::I16, flags, addr, 0);
+                    builder.ins().sextend(ir::types::I32, value)
+                }
+                BuiltinInst::I32UnsignedLoad16Le { addr } => {
+                    let addr = v(&values, *addr);
+                    let value = builder.ins().load(ir::types::I16, flags, addr, 0);
+                    builder.ins().uextend(ir::types::I32, value)
+                }
+                BuiltinInst::I32LoadLe { addr } => {
+                    let addr = v(&values, *addr);
+                    builder.ins().load(ir::types::I32, flags, addr, 0)
+                }
+                BuiltinInst::I64LoadLe { addr } => {
+                    let addr = v(&values, *addr);
+                    builder.ins().load(ir::types::I64, flags, addr, 0)
+                }
+                BuiltinInst::I32Store8 { addr, value } => {
+                    let addr = v(&values, *addr);
+                    let value = v(&values, *value);
+                    debug_assert_eq!(builder.func.dfg.value_type(value), ir::types::I32);
+                    let value = builder.ins().ireduce(ir::types::I8, value);
+                    builder.ins().store(flags, value, addr, 0);
+                    value
+                }
+                BuiltinInst::I32Store16Le { addr, value } => {
+                    let addr = v(&values, *addr);
+                    let value = v(&values, *value);
+                    debug_assert_eq!(builder.func.dfg.value_type(value), ir::types::I32);
+                    let value = builder.ins().ireduce(ir::types::I16, value);
+                    builder.ins().store(flags, value, addr, 0);
+                    value
+                }
+                BuiltinInst::I32StoreLe { addr, value } => {
+                    let addr = v(&values, *addr);
+                    let value = v(&values, *value);
+                    debug_assert_eq!(builder.func.dfg.value_type(value), ir::types::I32);
+                    builder.ins().store(flags, value, addr, 0);
+                    value
+                }
+                BuiltinInst::I64StoreLe { addr, value } => {
+                    let addr = v(&values, *addr);
+                    let value = v(&values, *value);
+                    debug_assert_eq!(builder.func.dfg.value_type(value), ir::types::I32);
+                    builder.ins().store(flags, value, addr, 0);
+                    value
+                }
+            });
+        }
+
+        builtin.results.iter().map(|r| v(&values, *r)).collect()
     }
 
     /// Do an indirect call through the given funcref table.
@@ -2679,13 +2823,13 @@ impl FuncEnvironment<'_> {
         )
     }
 
-    pub fn translate_call(
+    pub fn translate_call<'a>(
         &mut self,
-        builder: &mut FunctionBuilder,
+        builder: &'a mut FunctionBuilder,
         callee_index: FuncIndex,
         callee: ir::FuncRef,
         call_args: &[ir::Value],
-    ) -> WasmResult<ir::Inst> {
+    ) -> WasmResult<Cow<'a, [ir::Value]>> {
         Call::new(builder, self).direct_call(callee_index, callee, call_args)
     }
 

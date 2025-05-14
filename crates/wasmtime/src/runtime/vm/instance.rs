@@ -1393,13 +1393,25 @@ impl Instance {
             .write(VmPtr::from(ptr));
 
         // Initialize the imports
-        debug_assert_eq!(imports.functions.len(), module.num_imported_funcs);
+
+        // TODO FITZGEN: need to split this into multiple copies to avoid
+        // introducing off-by-ones after each import satisfied by a compile-time
+        // builtin.
+        //
+        // TODO FITZGEN: need to initialize the slots for the compile-time
+        // builtins with the standalone versions (and their trampolines) that we
+        // (will have) created in module compilation.
+        debug_assert_eq!(
+            imports.functions.len(),
+            module.num_imported_funcs - module.compile_time_builtins.len()
+        );
         ptr::copy_nonoverlapping(
             imports.functions.as_ptr(),
             self.vmctx_plus_offset_mut(offsets.vmctx_imported_functions_begin())
                 .as_ptr(),
             imports.functions.len(),
         );
+
         debug_assert_eq!(imports.tables.len(), module.num_imported_tables);
         ptr::copy_nonoverlapping(
             imports.tables.as_ptr(),
@@ -1407,6 +1419,7 @@ impl Instance {
                 .as_ptr(),
             imports.tables.len(),
         );
+
         debug_assert_eq!(imports.memories.len(), module.num_imported_memories);
         ptr::copy_nonoverlapping(
             imports.memories.as_ptr(),
@@ -1414,6 +1427,7 @@ impl Instance {
                 .as_ptr(),
             imports.memories.len(),
         );
+
         debug_assert_eq!(imports.globals.len(), module.num_imported_globals);
         ptr::copy_nonoverlapping(
             imports.globals.as_ptr(),

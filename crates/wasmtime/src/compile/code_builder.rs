@@ -44,7 +44,7 @@ pub struct CodeBuilder<'a> {
     wasm_path: Option<Cow<'a, Path>>,
     dwarf_package: Option<Cow<'a, [u8]>>,
     dwarf_package_path: Option<Cow<'a, Path>>,
-    compile_time_builtins: BTreeMap<(String, String), CompileTimeBuiltinData>,
+    pub(super) compile_time_builtins: BTreeMap<(String, String), CompileTimeBuiltinData>,
 }
 
 /// Return value of [`CodeBuilder::hint`]
@@ -296,7 +296,13 @@ impl<'a> CodeBuilder<'a> {
     pub fn compile_module_serialized(&self) -> Result<Vec<u8>> {
         let wasm = self.get_wasm()?;
         let dwarf_package = self.get_dwarf_package();
-        let (v, _) = super::build_artifacts(self.engine, &wasm, dwarf_package.as_deref(), &())?;
+        let (v, _) = super::build_artifacts(
+            self.engine,
+            &wasm,
+            dwarf_package.as_deref(),
+            &self.compile_time_builtins,
+            &(),
+        )?;
         Ok(v)
     }
 
@@ -306,7 +312,8 @@ impl<'a> CodeBuilder<'a> {
     #[cfg(feature = "component-model")]
     pub fn compile_component_serialized(&self) -> Result<Vec<u8>> {
         let bytes = self.get_wasm()?;
-        let (v, _) = super::build_component_artifacts(self.engine, &bytes, None, &())?;
+        let (v, _) =
+            super::build_component_artifacts(self.engine, &bytes, None, &BTreeMap::default(), &())?;
         Ok(v)
     }
 }
