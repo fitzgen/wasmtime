@@ -44,7 +44,10 @@ use wasmtime_environ::{
 };
 
 mod code_builder;
-pub use self::code_builder::{CodeBuilder, CodeHint, HashedEngineCompileEnv};
+pub use self::code_builder::{
+    CodeBuilder, CodeHint, CompileTimeBuiltinBuilder, CompileTimeBuiltinValue,
+    HashedEngineCompileEnv,
+};
 
 #[cfg(feature = "runtime")]
 mod runtime;

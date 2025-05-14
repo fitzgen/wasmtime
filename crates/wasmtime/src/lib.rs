@@ -378,7 +378,7 @@ pub use runtime::*;
 #[cfg(any(feature = "cranelift", feature = "winch"))]
 mod compile;
 #[cfg(any(feature = "cranelift", feature = "winch"))]
-pub use compile::{CodeBuilder, CodeHint};
+pub use compile::{CodeBuilder, CodeHint, CompileTimeBuiltinBuilder, CompileTimeBuiltinValue};
 
 mod config;
 mod engine;

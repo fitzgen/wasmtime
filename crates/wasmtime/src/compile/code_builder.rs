@@ -1,7 +1,11 @@
 use crate::prelude::*;
 use crate::Engine;
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 use std::path::Path;
+use wasmtime_environ::{CompileTimeBuiltinData, CompileTimeBuiltinInst};
+
+pub use wasmtime_environ::CompileTimeBuiltinValue;
 
 /// Builder-style structure used to create a [`Module`](crate::module::Module) or
 /// pre-compile a module to a serialized list of bytes.
@@ -40,6 +44,7 @@ pub struct CodeBuilder<'a> {
     wasm_path: Option<Cow<'a, Path>>,
     dwarf_package: Option<Cow<'a, [u8]>>,
     dwarf_package_path: Option<Cow<'a, Path>>,
+    compile_time_builtins: BTreeMap<(String, String), CompileTimeBuiltinData>,
 }
 
 /// Return value of [`CodeBuilder::hint`]
@@ -60,6 +65,7 @@ impl<'a> CodeBuilder<'a> {
             wasm_path: None,
             dwarf_package: None,
             dwarf_package_path: None,
+            compile_time_builtins: BTreeMap::new(),
         }
     }
 
@@ -236,6 +242,22 @@ impl<'a> CodeBuilder<'a> {
         Ok(self)
     }
 
+    /// TODO FITZGEN
+    pub fn define_compile_time_builtin(
+        &mut self,
+        module: impl Into<String>,
+        name: impl Into<String>,
+    ) -> CompileTimeBuiltinBuilder<'_, 'a> {
+        let module = module.into();
+        let name = name.into();
+        CompileTimeBuiltinBuilder {
+            code_builder: self,
+            module,
+            name,
+            data: CompileTimeBuiltinData::default(),
+        }
+    }
+
     /// Returns a hint, if possible, of what the provided bytes are.
     ///
     /// This method can be use to detect what the previously supplied bytes to
@@ -315,3 +337,62 @@ impl std::hash::Hash for HashedEngineCompileEnv<'_> {
         config.module_version.hash(hasher);
     }
 }
+
+macro_rules! define_compile_time_builtin_builder {
+    (
+        $(
+            $( #[$attr:meta] )*
+            $snake_name:ident = $name:ident $( { $( $field:ident : $field_ty:ty ),* $(,)? } )? $( -> $ret_ty:ty )?
+        ),* $(,)?
+    ) => {
+        /// TODO FITZGEN
+        pub struct CompileTimeBuiltinBuilder<'a, 'b> {
+            code_builder: &'a mut CodeBuilder<'b>,
+            module: String,
+            name: String,
+            data: CompileTimeBuiltinData,
+        }
+
+        impl CompileTimeBuiltinBuilder<'_, '_> {
+            /// TODO FITZGEN
+            pub fn finish(mut self, results: impl IntoIterator<Item = CompileTimeBuiltinValue>) -> Result<()> {
+                let key = (self.module, self.name);
+
+                if self.code_builder.compile_time_builtins.contains_key(&key) {
+                    bail!(
+                        "already defined compile-time builtin `module={:?}` and `name={:?}`",
+                        key.0,
+                        key.1,
+                    );
+                }
+
+                self.data.results.extend(results);
+
+                // TODO FITZGEN: validate and type check the builtin function.
+
+                self.code_builder.compile_time_builtins.insert(key, self.data);
+                Ok(())
+            }
+
+            $(
+                $( #[$attr] )*
+                pub fn $snake_name(
+                    &mut self,
+                    $(
+                        $(
+                            $field : $field_ty
+                        ),*
+                    )?
+                ) $( -> $ret_ty )? {
+                    let _val = self.data.body.push(CompileTimeBuiltinInst::$name $( { $( $field ),* } )?);
+                    $(
+                        let ret: $ret_ty = _val;
+                        ret
+                    )?
+                }
+            )*
+        }
+    }
+}
+
+wasmtime_environ::for_each_compile_time_builtin_inst!(define_compile_time_builtin_builder);
