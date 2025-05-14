@@ -1447,6 +1447,16 @@ entity_impl!(TagIndex);
 pub struct StaticModuleIndex(u32);
 entity_impl!(StaticModuleIndex);
 
+/// TODO FITZGEN
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+pub struct CompileTimeBuiltin(u32);
+entity_impl!(CompileTimeBuiltin);
+
+/// TODO FITZGEN
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+pub struct CompileTimeBuiltinValue(u32);
+entity_impl!(CompileTimeBuiltinValue);
+
 /// An index of an entity.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub enum EntityIndex {

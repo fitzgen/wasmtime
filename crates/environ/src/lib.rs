@@ -19,6 +19,7 @@ extern crate alloc;
 pub mod prelude;
 
 mod address_map;
+mod compile_time_builtins;
 #[macro_use]
 mod builtin;
 mod demangling;
@@ -41,6 +42,7 @@ mod vmoffsets;
 pub use self::ext::*;
 pub use crate::address_map::*;
 pub use crate::builtin::*;
+pub use crate::compile_time_builtins::*;
 pub use crate::demangling::*;
 pub use crate::error::*;
 pub use crate::gc::*;
