@@ -14,6 +14,7 @@ use crate::dominator_tree::DominatorTree;
 use crate::dominator_tree::DominatorTreePreorder;
 use crate::egraph::EgraphPass;
 use crate::flowgraph::ControlFlowGraph;
+use crate::inline::{do_inlining, Inline};
 use crate::ir::Function;
 use crate::isa::TargetIsa;
 use crate::legalizer::simple_legalize;
@@ -25,8 +26,8 @@ use crate::result::{CodegenResult, CompileResult};
 use crate::settings::{FlagsOrIsa, OptLevel};
 use crate::trace;
 use crate::unreachable_code::eliminate_unreachable_code;
-use crate::verifier::{VerifierErrors, VerifierResult, verify_context};
-use crate::{CompileError, timing};
+use crate::verifier::{verify_context, VerifierErrors, VerifierResult};
+use crate::{timing, CompileError};
 #[cfg(feature = "souper-harvest")]
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -191,6 +192,13 @@ impl Context {
         }
 
         Ok(())
+    }
+
+    /// Perform function call inlining.
+    ///
+    /// Returns `true` if any function call was inlined, `false` otherwise.
+    pub fn inline(&mut self, inliner: &impl Inline) -> CodegenResult<bool> {
+        do_inlining(&mut self.func, inliner)
     }
 
     /// Compile the function,
