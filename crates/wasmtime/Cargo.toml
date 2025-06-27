@@ -62,6 +62,7 @@ smallvec = { workspace = true, optional = true }
 hashbrown = { workspace = true, features = ["default-hasher"] }
 bitflags = { workspace = true }
 futures = { workspace = true, features = ["alloc"], optional = true }
+rustc-hash = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies.windows-sys]
 workspace = true
@@ -290,6 +291,7 @@ gc-drc = [
   "wasmtime-environ/gc-drc",
   "wasmtime-cranelift?/gc-drc",
   "wasmtime-winch?/gc-drc",
+  "dep:rustc-hash",
 ]
 
 # Enable the null garbage collector.

@@ -43,8 +43,6 @@
 
 use super::free_list::FreeList;
 use super::{VMArrayRef, VMStructRef};
-use crate::hash_map::HashMap;
-use crate::hash_set::HashSet;
 use crate::runtime::vm::{
     ExternRefHostDataId, ExternRefHostDataTable, GarbageCollection, GcHeap, GcHeapObject,
     GcProgress, GcRootsIter, GcRuntime, TypedGcRef, VMExternRef, VMGcHeader, VMGcRef,
@@ -60,6 +58,7 @@ use core::{
     ops::{Deref, DerefMut},
     ptr::NonNull,
 };
+use rustc_hash::FxBuildHasher;
 use wasmtime_environ::drc::{ARRAY_LENGTH_OFFSET, DrcTypeLayouts};
 use wasmtime_environ::{
     GcArrayLayout, GcLayout, GcStructLayout, GcTypeLayouts, VMGcKind, VMSharedTypeIndex,
@@ -67,6 +66,9 @@ use wasmtime_environ::{
 
 #[allow(clippy::cast_possible_truncation)]
 const GC_REF_ARRAY_ELEMS_OFFSET: u32 = ARRAY_LENGTH_OFFSET + (mem::size_of::<u32>() as u32);
+
+type FxHashMap<K, V> = crate::hash_map::HashMap<K, V, FxBuildHasher>;
+type FxHashSet<T> = crate::hash_set::HashSet<T, FxBuildHasher>;
 
 /// The deferred reference-counting (DRC) collector.
 ///
@@ -113,7 +115,7 @@ struct DrcHeap {
     engine: EngineWeak,
 
     /// For every type that we have allocated in this heap, how do we trace it?
-    trace_infos: HashMap<VMSharedTypeIndex, TraceInfo>,
+    trace_infos: FxHashMap<VMSharedTypeIndex, TraceInfo>,
 
     /// Count of how many no-gc scopes we are currently within.
     no_gc_count: u64,
@@ -154,7 +156,7 @@ impl DrcHeap {
         log::trace!("allocating new DRC heap");
         Ok(Self {
             engine: engine.weak(),
-            trace_infos: HashMap::default(),
+            trace_infos: FxHashMap::default(),
             no_gc_count: 0,
             activations_table: Box::new(VMGcRefActivationsTable::default()),
             memory: None,
@@ -352,7 +354,7 @@ impl DrcHeap {
         // the table. If that weren't true, than either we forgot to insert a
         // reference in the table when passing it into Wasm (a bug) or we are
         // reading invalid references from the stack (another bug).
-        let mut activations_table_set: DebugOnly<HashSet<_>> = Default::default();
+        let mut activations_table_set: DebugOnly<FxHashSet<_>> = Default::default();
         if cfg!(debug_assertions) {
             self.activations_table.elements(|elem| {
                 activations_table_set.insert(elem.unchecked_copy());
@@ -909,7 +911,7 @@ struct VMGcRefActivationsTable {
     /// re-initialized to the just-discovered precise set of stack roots (which
     /// immediately becomes an over-approximation again as soon as Wasm runs and
     /// potentially drops references).
-    over_approximated_stack_roots: HashSet<VMGcRef>,
+    over_approximated_stack_roots: FxHashSet<VMGcRef>,
 
     /// The precise set of on-stack, inside-Wasm GC roots that we discover via
     /// walking the stack and interpreting stack maps.
@@ -917,7 +919,7 @@ struct VMGcRefActivationsTable {
     /// This is *only* used inside the `gc` function, and is empty otherwise. It
     /// is just part of this struct so that we can reuse the allocation, rather
     /// than create a new hash set every GC.
-    precise_stack_roots: HashSet<VMGcRef>,
+    precise_stack_roots: FxHashSet<VMGcRef>,
 }
 
 /// The chunk of memory that we bump-allocate into for the fast path of
@@ -1048,8 +1050,8 @@ impl VMGcRefActivationsTable {
     fn new() -> Self {
         VMGcRefActivationsTable {
             alloc: VMGcRefTableAlloc::default(),
-            over_approximated_stack_roots: HashSet::new(),
-            precise_stack_roots: HashSet::new(),
+            over_approximated_stack_roots: FxHashSet::default(),
+            precise_stack_roots: FxHashSet::default(),
         }
     }
 
