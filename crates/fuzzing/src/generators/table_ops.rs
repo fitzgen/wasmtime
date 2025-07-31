@@ -14,9 +14,12 @@ use wasm_encoder::{
 /// operations.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct TableOps {
+    // TODO: Move these fields out into a new `TableOpsLimits` struct, pass this
+    // into `TableOp::fixup` instead of all of `TableOps`
     pub(crate) num_params: u32,
     pub(crate) num_globals: u32,
     pub(crate) table_size: i32,
+
     pub(crate) ops: Vec<TableOp>,
 }
 
@@ -154,6 +157,8 @@ impl TableOps {
     /// Fixes the stack after mutating the `idx`th op.
     ///
     /// The abstract stack depth starting at the `idx`th opcode must be `stack`.
+    ///
+    /// TODO: needs to always iterate over all ops, not just from idx...
     fn fixup(&mut self, idx: usize, mut stack: usize) {
         let mut new_ops = Vec::with_capacity(self.ops.len());
         new_ops.extend_from_slice(&self.ops[..idx]);
@@ -161,7 +166,9 @@ impl TableOps {
         // Iterate through all ops including and after `idx`, inserting a null
         // ref for any missing operands when they want to pop more operands than
         // exist on the stack.
-        new_ops.extend(self.ops[idx..].iter().copied().flat_map(|op| {
+        new_ops.extend(self.ops[idx..].iter().copied().flat_map(|mut op| {
+            op.fixup(&self);
+
             let mut temp = SmallVec::<[_; 4]>::new();
 
             while stack < op.operands_len() {
@@ -288,7 +295,7 @@ impl Generate<TableOps> for TableOpsMutator {
 macro_rules! define_table_ops {
     (
         $(
-            $op:ident $( ( $($limit:expr => $ty:ty),* ) )? : $params:expr => $results:expr ,
+            $op:ident $( ( $($limit_var:ident : $limit:expr => $ty:ty),* ) )? : $params:expr => $results:expr ,
         )*
     ) => {
         #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
@@ -357,6 +364,21 @@ macro_rules! define_table_ops {
         )*
 
         impl TableOp {
+            fn fixup(&mut self, ops: &TableOps) {
+                match self {
+                    $(
+                        Self::$op( $( $( $limit_var ),* )? ) => {
+                            $( $(
+                                let limit_fn = $limit as fn(&TableOps) -> $ty;
+                                let limit = (limit_fn)(ops);
+                                debug_assert!(limit > 0);
+                                *$limit_var = *$limit_var % limit;
+                            )* )?
+                        }
+                    )*
+                }
+            }
+
             fn generate(
                 ctx: &mut mutatis::Context,
                 ops: &TableOps,
@@ -396,14 +418,14 @@ define_table_ops! {
     TakeRefs : 3 => 0,
 
     // Add one to make sure that out of bounds table accesses are possible, but still rare.
-    TableGet(|ops| ops.table_size + 1 => i32) : 0 => 1,
-    TableSet(|ops| ops.table_size + 1 => i32) : 1 => 0,
+    TableGet(elem_index: |ops| ops.table_size + 1 => i32) : 0 => 1,
+    TableSet(elem_index: |ops| ops.table_size + 1 => i32) : 1 => 0,
 
-    GlobalGet(|ops| ops.num_globals => u32) : 0 => 1,
-    GlobalSet(|ops| ops.num_globals => u32) : 1 => 0,
+    GlobalGet(global_index: |ops| ops.num_globals => u32) : 0 => 1,
+    GlobalSet(global_index: |ops| ops.num_globals => u32) : 1 => 0,
 
-    LocalGet(|ops| ops.num_params => u32) : 0 => 1,
-    LocalSet(|ops| ops.num_params => u32) : 1 => 0,
+    LocalGet(local_index: |ops| ops.num_params => u32) : 0 => 1,
+    LocalSet(local_index: |ops| ops.num_params => u32) : 1 => 0,
 
     Drop : 1 => 0,
 
