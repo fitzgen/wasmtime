@@ -294,7 +294,7 @@ impl<'a> Elaborator<'a> {
         let use_worst = self.ctrl_plane.get_decision();
 
         trace!(
-            "Computing the {} values for each eclass",
+            "=== Computing the {} values for each eclass ===",
             if use_worst {
                 "worst (chaos mode)"
             } else {
@@ -353,7 +353,19 @@ impl<'a> Elaborator<'a> {
                             }),
                         );
                         best[value] = BestEntry(cost, value);
-                        trace!(" -> cost of value {} = {:?}", value, cost);
+                        if cfg!(feature = "trace-log") && log::log_enabled!(log::Level::Trace) {
+                            trace!(
+                                " -> cost of value {} = {:?} = sum({})",
+                                value,
+                                cost,
+                                Some(Cost::of_opcode(self.func.dfg.insts[inst].opcode()))
+                                    .into_iter()
+                                    .chain(self.func.dfg.inst_values(inst).map(|v| best[v].0))
+                                    .map(|c| format!("{c:?}"))
+                                    .collect::<Vec<_>>()
+                                    .join(" + ")
+                            );
+                        }
                     }
                 }
             };
@@ -515,6 +527,7 @@ impl<'a> Elaborator<'a> {
                     if self.value_to_best_value[value].0 != Cost::zero()
                         || self.value_to_best_value[best_value].0 != Cost::zero()
                     {
+                        trace!("  setting cost({value}) to zero");
                         self.value_to_best_value[value].0 = Cost::zero();
                         self.value_to_best_value[best_value].0 = Cost::zero();
                         self.compute_best_values(sorted_values);
