@@ -307,6 +307,7 @@ impl<'a> Elaborator<'a> {
         // computed by the time we are computing the cost for the current value
         // and its instruction.
         for value in sorted_values.iter().copied() {
+            debug_assert!(!value.is_reserved_value());
             let def = self.func.dfg.value_def(value);
             trace!("computing best for value {:?} def {:?}", value, def);
 
@@ -338,6 +339,7 @@ impl<'a> Elaborator<'a> {
                 // then it must be computed and thus we give it zero
                 // cost.
                 ValueDef::Result(inst, _) => {
+                    debug_assert!(!inst.is_reserved_value());
                     if let Some(_) = self.func.layout.inst_block(inst) {
                         best[value] = BestEntry(Cost::zero(), value);
                     } else {
@@ -352,7 +354,7 @@ impl<'a> Elaborator<'a> {
                                 best[value].0
                             }),
                         );
-                        best[value] = BestEntry(cost, value);
+                        best[value] = BestEntry(std::cmp::min(best[value].0, cost), value);
                         if cfg!(feature = "trace-log") && log::log_enabled!(log::Level::Trace) {
                             trace!(
                                 " -> cost of value {} = {:?} = sum({})",
