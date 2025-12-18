@@ -282,9 +282,7 @@ impl<'a> Elaborator<'a> {
         sorted
     }
 
-    fn compute_best_values(&mut self) {
-        let sorted_values = self.topo_sorted_values();
-
+    fn compute_best_values(&mut self, sorted_values: &[Value]) {
         let best = &mut self.value_to_best_value;
 
         // We can't make random decisions inside the fixpoint loop below because
@@ -394,7 +392,12 @@ impl<'a> Elaborator<'a> {
     /// instructions before the given inst `before`. Should only be
     /// given values corresponding to results of instructions or
     /// blockparams.
-    fn elaborate_eclass_use(&mut self, value: Value, before: Inst) -> ElaboratedValue {
+    fn elaborate_eclass_use(
+        &mut self,
+        value: Value,
+        before: Inst,
+        sorted_values: &[Value],
+    ) -> ElaboratedValue {
         debug_assert_ne!(value, Value::reserved_value());
 
         // Kick off the process by requesting this result
@@ -404,7 +407,7 @@ impl<'a> Elaborator<'a> {
 
         // Now run the explicit-stack recursion until we reach
         // the root.
-        self.process_elab_stack();
+        self.process_elab_stack(sorted_values);
         debug_assert_eq!(self.elab_result_stack.len(), 1);
         self.elab_result_stack.pop().unwrap()
     }
@@ -448,7 +451,7 @@ impl<'a> Elaborator<'a> {
         }
     }
 
-    fn process_elab_stack(&mut self) {
+    fn process_elab_stack(&mut self, sorted_values: &[Value]) {
         while let Some(entry) = self.elab_stack.pop() {
             match entry {
                 ElabStackEntry::Start { value, before } => {
@@ -507,6 +510,15 @@ impl<'a> Elaborator<'a> {
                         " -> result {} of inst {:?}",
                         result_idx, self.func.dfg.insts[inst]
                     );
+
+                    // TODO FITZGEN: explain this
+                    if self.value_to_best_value[value].0 != Cost::zero()
+                        || self.value_to_best_value[best_value].0 != Cost::zero()
+                    {
+                        self.value_to_best_value[value].0 = Cost::zero();
+                        self.value_to_best_value[best_value].0 = Cost::zero();
+                        self.compute_best_values(sorted_values);
+                    }
 
                     // We're going to need to use this instruction
                     // result, placing the instruction into the
@@ -746,7 +758,13 @@ impl<'a> Elaborator<'a> {
         }
     }
 
-    fn elaborate_block(&mut self, elab_values: &mut Vec<Value>, idom: Option<Block>, block: Block) {
+    fn elaborate_block(
+        &mut self,
+        elab_values: &mut Vec<Value>,
+        idom: Option<Block>,
+        block: Block,
+        sorted_values: &[Value],
+    ) {
         trace!("elaborate_block: block {}", block);
         self.start_block(idom, block);
 
@@ -780,7 +798,7 @@ impl<'a> Elaborator<'a> {
                 // Elaborate the arg, placing any newly-inserted insts
                 // before `before`. Get the updated value, which may
                 // be different than the original.
-                let mut new_arg = self.elaborate_eclass_use(*arg, before);
+                let mut new_arg = self.elaborate_eclass_use(*arg, before, sorted_values);
                 Self::maybe_remat_arg(
                     &self.remat_values,
                     &mut self.func,
@@ -816,7 +834,7 @@ impl<'a> Elaborator<'a> {
         }
     }
 
-    fn elaborate_domtree(&mut self, domtree: &DominatorTree) {
+    fn elaborate_domtree(&mut self, domtree: &DominatorTree, sorted_values: &[Value]) {
         self.block_stack.push(BlockStackEntry::Elaborate {
             block: self.func.layout.entry_block().unwrap(),
             idom: None,
@@ -832,7 +850,7 @@ impl<'a> Elaborator<'a> {
                     self.block_stack.push(BlockStackEntry::Pop);
                     self.value_to_elaborated_value.increment_depth();
 
-                    self.elaborate_block(&mut elab_values, idom, block);
+                    self.elaborate_block(&mut elab_values, idom, block, sorted_values);
 
                     // Push children. We are doing a preorder
                     // traversal so we do this after processing this
@@ -860,8 +878,9 @@ impl<'a> Elaborator<'a> {
     pub(crate) fn elaborate(&mut self) {
         self.stats.elaborate_func += 1;
         self.stats.elaborate_func_pre_insts += self.func.dfg.num_insts() as u64;
-        self.compute_best_values();
-        self.elaborate_domtree(&self.domtree);
+        let sorted_values = self.topo_sorted_values();
+        self.compute_best_values(&sorted_values);
+        self.elaborate_domtree(&self.domtree, &sorted_values);
         self.stats.elaborate_func_post_insts += self.func.dfg.num_insts() as u64;
     }
 }
