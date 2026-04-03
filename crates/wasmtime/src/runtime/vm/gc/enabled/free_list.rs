@@ -1,8 +1,8 @@
 use crate::prelude::*;
-use alloc::collections::BTreeMap;
-use core::{alloc::Layout, num::NonZeroU32, ops::Bound};
+use core::{alloc::Layout, num::NonZeroU32};
 
-/// A very simple first-fit free list for use by our garbage collectors.
+/// A free list for use by our garbage collectors, using a sorted Vec of
+/// (index, length) pairs for cache-friendly operations.
 pub(crate) struct FreeList {
     /// The total capacity of the contiguous range of memory we are managing.
     ///
@@ -22,9 +22,8 @@ pub(crate) struct FreeList {
     /// even though it would have enough capacity for many allocations after
     /// enough iterations of the loop.
     capacity: usize,
-    /// Our free blocks, as a map from index to length of the free block at that
-    /// index.
-    free_block_index_to_len: BTreeMap<u32, u32>,
+    /// Free blocks sorted by index. Each entry is (block_index, block_length).
+    blocks: Vec<(u32, u32)>,
 }
 
 /// Our minimum and maximum supported alignment. Every allocation is aligned to
@@ -52,7 +51,7 @@ impl FreeList {
 
         let mut free_list = FreeList {
             capacity,
-            free_block_index_to_len: BTreeMap::new(),
+            blocks: Vec::new(),
         };
 
         let end = u32::try_from(free_list.capacity).unwrap_or_else(|_| {
@@ -73,7 +72,7 @@ impl FreeList {
             None
         };
 
-        free_list.free_block_index_to_len.extend(entire_range);
+        free_list.blocks.extend(entire_range);
 
         free_list
     }
@@ -180,16 +179,11 @@ impl FreeList {
     fn first_fit(&mut self, alloc_size: u32) -> Option<(u32, u32)> {
         debug_assert_eq!(alloc_size % ALIGN_U32, 0);
 
-        let (&block_index, &block_len) = self
-            .free_block_index_to_len
-            .iter()
-            .find(|(_idx, len)| **len >= alloc_size)?;
+        let pos = self.blocks.iter().position(|&(_, len)| len >= alloc_size)?;
+        let (block_index, block_len) = self.blocks.remove(pos);
 
         debug_assert_eq!(block_index % ALIGN_U32, 0);
         debug_assert_eq!(block_len % ALIGN_U32, 0);
-
-        let entry = self.free_block_index_to_len.remove(&block_index);
-        debug_assert!(entry.is_some());
 
         Some((block_index, block_len))
     }
@@ -218,7 +212,11 @@ impl FreeList {
         debug_assert_eq!(split_start % ALIGN_U32, 0);
         debug_assert_eq!(split_len % ALIGN_U32, 0);
 
-        self.free_block_index_to_len.insert(split_start, split_len);
+        let pos = self
+            .blocks
+            .binary_search_by_key(&split_start, |&(idx, _)| idx)
+            .unwrap_err();
+        self.blocks.insert(pos, (split_start, split_len));
 
         new_block_len
     }
@@ -269,17 +267,23 @@ impl FreeList {
         let alloc_size = self.check_layout(layout).unwrap();
         debug_assert_eq!(alloc_size % ALIGN_U32, 0);
 
-        let prev_block = self
-            .free_block_index_to_len
-            .range((Bound::Unbounded, Bound::Excluded(index)))
-            .next_back()
-            .map(|(idx, len)| (*idx, *len));
+        // Find the insertion point via binary search.
+        let pos = self
+            .blocks
+            .binary_search_by_key(&index, |&(idx, _)| idx)
+            .unwrap_err();
 
-        let next_block = self
-            .free_block_index_to_len
-            .range((Bound::Excluded(index), Bound::Unbounded))
-            .next()
-            .map(|(idx, len)| (*idx, *len));
+        let prev_block = if pos > 0 {
+            Some(self.blocks[pos - 1])
+        } else {
+            None
+        };
+
+        let next_block = if pos < self.blocks.len() {
+            Some(self.blocks[pos])
+        } else {
+            None
+        };
 
         // Try and merge this block with its previous and next blocks in the
         // free list, if any and if they are contiguous.
@@ -296,10 +300,11 @@ impl FreeList {
                     index_end = index + u32::try_from(layout.size()).unwrap(),
                     next_end = next_index + next_len,
                 );
-                self.free_block_index_to_len.remove(&next_index);
+                // Remove next block and extend prev block.
+                self.blocks.remove(pos);
                 let merged_block_len = next_index + next_len - prev_index;
                 debug_assert_eq!(merged_block_len % ALIGN_U32, 0);
-                *self.free_block_index_to_len.get_mut(&prev_index).unwrap() = merged_block_len;
+                self.blocks[pos - 1].1 = merged_block_len;
             }
 
             // The prev and this blocks are contiguous: merge this into prev.
@@ -313,7 +318,7 @@ impl FreeList {
                 );
                 let merged_block_len = index + alloc_size - prev_index;
                 debug_assert_eq!(merged_block_len % ALIGN_U32, 0);
-                *self.free_block_index_to_len.get_mut(&prev_index).unwrap() = merged_block_len;
+                self.blocks[pos - 1].1 = merged_block_len;
             }
 
             // The this and next blocks are contiguous: merge next into this.
@@ -325,17 +330,16 @@ impl FreeList {
                     index_end = index + u32::try_from(layout.size()).unwrap(),
                     next_end = next_index + next_len,
                 );
-                self.free_block_index_to_len.remove(&next_index);
                 let merged_block_len = next_index + next_len - index;
                 debug_assert_eq!(merged_block_len % ALIGN_U32, 0);
-                self.free_block_index_to_len.insert(index, merged_block_len);
+                self.blocks[pos] = (index, merged_block_len);
             }
 
             // None of the blocks are contiguous: insert this block into the
             // free list.
             (_, _) => {
                 log::trace!("cannot merge blocks");
-                self.free_block_index_to_len.insert(index, alloc_size);
+                self.blocks.insert(pos, (index, alloc_size));
             }
         }
 
@@ -347,7 +351,7 @@ impl FreeList {
 
     /// Iterate over all free blocks as `(index, len)` pairs.
     pub fn iter_free_blocks(&self) -> impl Iterator<Item = (u32, u32)> + '_ {
-        self.free_block_index_to_len.iter().map(|(&i, &l)| (i, l))
+        self.blocks.iter().copied()
     }
 
     /// Assert that the free list is valid:
@@ -362,7 +366,7 @@ impl FreeList {
     #[cfg(debug_assertions)]
     fn check_integrity(&self) {
         let mut prev_end = None;
-        for (&index, &len) in self.free_block_index_to_len.iter() {
+        for &(index, len) in self.blocks.iter() {
             // (1)
             let end = index + len;
             assert!(usize::try_from(end).unwrap() <= self.capacity);
@@ -431,12 +435,11 @@ mod tests {
     use std::num::NonZeroUsize;
 
     fn free_list_block_len_and_size(free_list: &FreeList) -> (usize, Option<usize>) {
-        let len = free_list.free_block_index_to_len.len();
+        let len = free_list.blocks.len();
         let size = free_list
-            .free_block_index_to_len
-            .values()
-            .next()
-            .map(|s| usize::try_from(*s).unwrap());
+            .blocks
+            .first()
+            .map(|&(_, s)| usize::try_from(s).unwrap());
         (len, size)
     }
 
@@ -598,7 +601,7 @@ mod tests {
         // `ALIGN_U32`.
         let mut free_list = FreeList::new(ALIGN_USIZE + ALIGN_USIZE * 2);
 
-        assert_eq!(free_list.free_block_index_to_len.len(), 1);
+        assert_eq!(free_list.blocks.len(), 1);
         assert_eq!(free_list.max_size(), ALIGN_USIZE * 2);
 
         // Allocate a block such that the remainder is not worth splitting.
@@ -608,7 +611,7 @@ mod tests {
             .expect("have free space available for allocation");
 
         // Should not have split the block.
-        assert_eq!(free_list.free_block_index_to_len.len(), 0);
+        assert_eq!(free_list.blocks.len(), 0);
     }
 
     #[test]
@@ -617,7 +620,7 @@ mod tests {
         // `ALIGN_U32`.
         let mut free_list = FreeList::new(ALIGN_USIZE + ALIGN_USIZE * 3);
 
-        assert_eq!(free_list.free_block_index_to_len.len(), 1);
+        assert_eq!(free_list.blocks.len(), 1);
         assert_eq!(free_list.max_size(), ALIGN_USIZE * 3);
 
         // Allocate a block such that the remainder is not worth splitting.
@@ -627,7 +630,7 @@ mod tests {
             .expect("have free space available for allocation");
 
         // Should have split the block.
-        assert_eq!(free_list.free_block_index_to_len.len(), 1);
+        assert_eq!(free_list.blocks.len(), 1);
     }
 
     #[test]
@@ -636,7 +639,7 @@ mod tests {
 
         let mut free_list = FreeList::new(ALIGN_USIZE + ALIGN_USIZE * 100);
         assert_eq!(
-            free_list.free_block_index_to_len.len(),
+            free_list.blocks.len(),
             1,
             "initially one big free block"
         );
@@ -646,7 +649,7 @@ mod tests {
             .expect("allocation within 'static' free list limits")
             .expect("have free space available for allocation");
         assert_eq!(
-            free_list.free_block_index_to_len.len(),
+            free_list.blocks.len(),
             1,
             "should have split the block to allocate `a`"
         );
@@ -656,21 +659,21 @@ mod tests {
             .expect("allocation within 'static' free list limits")
             .expect("have free space available for allocation");
         assert_eq!(
-            free_list.free_block_index_to_len.len(),
+            free_list.blocks.len(),
             1,
             "should have split the block to allocate `b`"
         );
 
         free_list.dealloc(a, layout);
         assert_eq!(
-            free_list.free_block_index_to_len.len(),
+            free_list.blocks.len(),
             2,
             "should have two non-contiguous free blocks after deallocating `a`"
         );
 
         free_list.dealloc(b, layout);
         assert_eq!(
-            free_list.free_block_index_to_len.len(),
+            free_list.blocks.len(),
             1,
             "should have merged `a` and `b` blocks with the rest to form a \
              single, contiguous free block after deallocating `b`"
@@ -683,7 +686,7 @@ mod tests {
 
         let mut free_list = FreeList::new(ALIGN_USIZE + ALIGN_USIZE * 100);
         assert_eq!(
-            free_list.free_block_index_to_len.len(),
+            free_list.blocks.len(),
             1,
             "initially one big free block"
         );
@@ -701,21 +704,21 @@ mod tests {
             .expect("allocation within 'static' free list limits")
             .expect("have free space available for allocation");
         assert_eq!(
-            free_list.free_block_index_to_len.len(),
+            free_list.blocks.len(),
             1,
             "should have split the block to allocate `a`, `b`, and `c`"
         );
 
         free_list.dealloc(a, layout);
         assert_eq!(
-            free_list.free_block_index_to_len.len(),
+            free_list.blocks.len(),
             2,
             "should have two non-contiguous free blocks after deallocating `a`"
         );
 
         free_list.dealloc(b, layout);
         assert_eq!(
-            free_list.free_block_index_to_len.len(),
+            free_list.blocks.len(),
             2,
             "should have merged `a` and `b` blocks, but not merged with the \
              rest of the free space"
@@ -730,7 +733,7 @@ mod tests {
 
         let mut free_list = FreeList::new(ALIGN_USIZE + ALIGN_USIZE * 100);
         assert_eq!(
-            free_list.free_block_index_to_len.len(),
+            free_list.blocks.len(),
             1,
             "initially one big free block"
         );
@@ -748,21 +751,21 @@ mod tests {
             .expect("allocation within 'static' free list limits")
             .expect("have free space available for allocation");
         assert_eq!(
-            free_list.free_block_index_to_len.len(),
+            free_list.blocks.len(),
             1,
             "should have split the block to allocate `a`, `b`, and `c`"
         );
 
         free_list.dealloc(a, layout);
         assert_eq!(
-            free_list.free_block_index_to_len.len(),
+            free_list.blocks.len(),
             2,
             "should have two non-contiguous free blocks after deallocating `a`"
         );
 
         free_list.dealloc(c, layout);
         assert_eq!(
-            free_list.free_block_index_to_len.len(),
+            free_list.blocks.len(),
             2,
             "should have merged `c` block with rest of the free space, but not \
              with `a` block"
@@ -777,7 +780,7 @@ mod tests {
 
         let mut free_list = FreeList::new(ALIGN_USIZE + ALIGN_USIZE * 100);
         assert_eq!(
-            free_list.free_block_index_to_len.len(),
+            free_list.blocks.len(),
             1,
             "initially one big free block"
         );
@@ -799,21 +802,21 @@ mod tests {
             .expect("allocation within 'static' free list limits")
             .expect("have free space available for allocation");
         assert_eq!(
-            free_list.free_block_index_to_len.len(),
+            free_list.blocks.len(),
             1,
             "should have split the block to allocate `a`, `b`, `c`, and `d`"
         );
 
         free_list.dealloc(a, layout);
         assert_eq!(
-            free_list.free_block_index_to_len.len(),
+            free_list.blocks.len(),
             2,
             "should have two non-contiguous free blocks after deallocating `a`"
         );
 
         free_list.dealloc(c, layout);
         assert_eq!(
-            free_list.free_block_index_to_len.len(),
+            free_list.blocks.len(),
             3,
             "should not have merged `c` block `a` block or rest of the free \
              space"
@@ -921,14 +924,14 @@ mod tests {
         free_list.dealloc(a, layout);
         free_list.dealloc(b, layout);
         assert_eq!(
-            free_list.free_block_index_to_len.len(),
+            free_list.blocks.len(),
             1,
             "`dealloc` should merge blocks from different `add_capacity` calls together"
         );
 
         free_list.add_capacity(ALIGN_USIZE);
         assert_eq!(
-            free_list.free_block_index_to_len.len(),
+            free_list.blocks.len(),
             1,
             "`add_capacity` should eagerly merge new capacity into the last block \
              in the free list, when possible"
