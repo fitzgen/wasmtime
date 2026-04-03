@@ -39,6 +39,13 @@ impl FreeList {
         Layout::from_size_align(size, ALIGN_USIZE).unwrap()
     }
 
+    /// Compute the aligned allocation size for a given byte size.
+    /// Returns the size rounded up to ALIGN, as a u32.
+    #[inline]
+    pub fn aligned_size(size: u32) -> u32 {
+        (size + ALIGN_U32 - 1) & !(ALIGN_U32 - 1)
+    }
+
     /// Get the current total capacity this free list manages.
     pub fn current_capacity(&self) -> usize {
         self.capacity
@@ -216,31 +223,50 @@ impl FreeList {
     pub fn alloc(&mut self, layout: Layout) -> Result<Option<NonZeroU32>> {
         log::trace!("FreeList::alloc({layout:?})");
         let alloc_size = self.check_layout(layout)?;
+        Ok(self.alloc_impl(alloc_size))
+    }
+
+    /// Fast-path allocation with a pre-computed aligned size.
+    #[inline]
+    pub fn alloc_fast(&mut self, alloc_size: u32) -> Option<NonZeroU32> {
+        debug_assert_eq!(alloc_size % ALIGN_U32, 0);
+        debug_assert!(alloc_size > 0);
+        self.alloc_impl(alloc_size)
+    }
+
+    #[inline]
+    fn alloc_impl(&mut self, alloc_size: u32) -> Option<NonZeroU32> {
         debug_assert_eq!(alloc_size % ALIGN_U32, 0);
 
-        let block_index = match self.first_fit_and_split(alloc_size) {
-            None => return Ok(None),
-            Some(idx) => idx,
-        };
+        let block_index = self.first_fit_and_split(alloc_size)?;
         debug_assert_ne!(block_index, 0);
         debug_assert_eq!(block_index % ALIGN_U32, 0);
 
-        // After we've mutated the free list, double check its integrity.
         #[cfg(debug_assertions)]
         self.check_integrity();
 
-        log::trace!("FreeList::alloc({layout:?}) -> {block_index:#x}");
-        Ok(Some(unsafe { NonZeroU32::new_unchecked(block_index) }))
+        log::trace!("FreeList::alloc -> {block_index:#x}");
+        Some(unsafe { NonZeroU32::new_unchecked(block_index) })
     }
 
     /// Deallocate an object with the given layout.
     pub fn dealloc(&mut self, index: NonZeroU32, layout: Layout) {
         log::trace!("FreeList::dealloc({index:#x}, {layout:?})");
-
-        let index = index.get();
-        debug_assert_eq!(index % ALIGN_U32, 0);
-
         let alloc_size = self.check_layout(layout).unwrap();
+        self.dealloc_impl(index.get(), alloc_size);
+    }
+
+    /// Fast-path deallocation with a pre-computed aligned size.
+    #[inline]
+    pub fn dealloc_fast(&mut self, index: NonZeroU32, alloc_size: u32) {
+        debug_assert_eq!(alloc_size % ALIGN_U32, 0);
+        debug_assert_eq!(index.get() % ALIGN_U32, 0);
+        self.dealloc_impl(index.get(), alloc_size);
+    }
+
+    #[inline]
+    fn dealloc_impl(&mut self, index: u32, alloc_size: u32) {
+        debug_assert_eq!(index % ALIGN_U32, 0);
         debug_assert_eq!(alloc_size % ALIGN_U32, 0);
 
         // Find the insertion point via binary search.
@@ -271,9 +297,9 @@ impl FreeList {
                     && blocks_are_contiguous(index, alloc_size, next_index) =>
             {
                 log::trace!(
-                    "merging blocks {prev_index:#x}..{prev_len:#x}, {index:#x}..{index_end:#x}, {next_index:#x}..{next_end:#x}",
-                    prev_len = prev_index + prev_len,
-                    index_end = index + u32::try_from(layout.size()).unwrap(),
+                    "merging blocks {prev_index:#x}..{prev_end:#x}, {index:#x}..{index_end:#x}, {next_index:#x}..{next_end:#x}",
+                    prev_end = prev_index + prev_len,
+                    index_end = index + alloc_size,
                     next_end = next_index + next_len,
                 );
                 // Remove next block and extend prev block.
@@ -288,9 +314,9 @@ impl FreeList {
                 if blocks_are_contiguous(prev_index, prev_len, index) =>
             {
                 log::trace!(
-                    "merging blocks {prev_index:#x}..{prev_len:#x}, {index:#x}..{index_end:#x}",
-                    prev_len = prev_index + prev_len,
-                    index_end = index + u32::try_from(layout.size()).unwrap(),
+                    "merging blocks {prev_index:#x}..{prev_end:#x}, {index:#x}..{index_end:#x}",
+                    prev_end = prev_index + prev_len,
+                    index_end = index + alloc_size,
                 );
                 let merged_block_len = index + alloc_size - prev_index;
                 debug_assert_eq!(merged_block_len % ALIGN_U32, 0);
@@ -303,7 +329,7 @@ impl FreeList {
             {
                 log::trace!(
                     "merging blocks {index:#x}..{index_end:#x}, {next_index:#x}..{next_end:#x}",
-                    index_end = index + u32::try_from(layout.size()).unwrap(),
+                    index_end = index + alloc_size,
                     next_end = next_index + next_len,
                 );
                 let merged_block_len = next_index + next_len - index;
