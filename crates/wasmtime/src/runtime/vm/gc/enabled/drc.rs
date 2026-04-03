@@ -46,7 +46,6 @@
 
 use super::VMArrayRef;
 use super::free_list::FreeList;
-use crate::hash_map::HashMap;
 use crate::hash_set::HashSet;
 use crate::runtime::vm::{
     ExternRefHostDataId, ExternRefHostDataTable, GarbageCollection, GcHeap, GcHeapObject,
@@ -116,7 +115,8 @@ struct DrcHeap {
     engine: EngineWeak,
 
     /// For every type that we have allocated in this heap, how do we trace it?
-    trace_infos: HashMap<VMSharedTypeIndex, TraceInfo>,
+    /// Indexed by VMSharedTypeIndex::bits() for O(1) lookup without hashing.
+    trace_infos: Vec<Option<TraceInfo>>,
 
     /// Count of how many no-gc scopes we are currently within.
     no_gc_count: u64,
@@ -160,7 +160,7 @@ impl DrcHeap {
         log::trace!("allocating new DRC heap");
         Ok(Self {
             engine: engine.weak(),
-            trace_infos: HashMap::with_capacity(1),
+            trace_infos: Vec::new(),
             no_gc_count: 0,
             over_approximated_stack_roots: Box::new(None),
             memory: None,
@@ -270,7 +270,8 @@ impl DrcHeap {
 
     /// Ensure that we have tracing information for the given type.
     fn ensure_trace_info(&mut self, ty: VMSharedTypeIndex) {
-        if self.trace_infos.contains_key(&ty) {
+        let idx = ty.bits() as usize;
+        if idx < self.trace_infos.len() && self.trace_infos[idx].is_some() {
             return;
         }
 
@@ -278,7 +279,8 @@ impl DrcHeap {
     }
 
     fn insert_new_trace_info(&mut self, ty: VMSharedTypeIndex) {
-        debug_assert!(!self.trace_infos.contains_key(&ty));
+        let idx = ty.bits() as usize;
+        debug_assert!(idx >= self.trace_infos.len() || self.trace_infos[idx].is_none());
 
         let engine = self.engine();
         let gc_layout = engine
@@ -304,7 +306,10 @@ impl DrcHeap {
             },
         };
 
-        let old_entry = self.trace_infos.insert(ty, info);
+        if idx >= self.trace_infos.len() {
+            self.trace_infos.resize_with(idx + 1, || None);
+        }
+        let old_entry = self.trace_infos[idx].replace(info);
         debug_assert!(old_entry.is_none());
     }
 
@@ -319,8 +324,8 @@ impl DrcHeap {
         };
 
         match self
-            .trace_infos
-            .get(&ty)
+            .trace_infos[ty.bits() as usize]
+            .as_ref()
             .expect("should have inserted trace info for every GC type allocated in this heap")
         {
             TraceInfo::Struct { gc_ref_offsets } => {
@@ -853,21 +858,18 @@ unsafe impl GcHeap for DrcHeap {
     }
 
     fn expose_gc_ref_to_wasm(&mut self, gc_ref: VMGcRef) {
-        let header = self.index_mut(drc_ref(&gc_ref));
-        if header.is_in_over_approximated_stack_roots() {
-            // Already in the over-approximated-stack-roots list, nothing more
-            // to do here.
-            return;
-        }
-
-        // Push this object onto the head of the over-approximated-stack-roots
-        // list.
-        header.set_in_over_approximated_stack_roots_bit(true);
+        // Read the current list head before borrowing through index_mut.
         let next = (*self.over_approximated_stack_roots)
             .as_ref()
             .map(|r| r.unchecked_copy());
-        self.index_mut(drc_ref(&gc_ref))
-            .set_next_over_approximated_stack_root(next);
+        let header = self.index_mut(drc_ref(&gc_ref));
+        if header.is_in_over_approximated_stack_roots() {
+            return;
+        }
+        // Push this object onto the head of the over-approximated-stack-roots
+        // list using a single index_mut call.
+        header.set_in_over_approximated_stack_roots_bit(true);
+        header.set_next_over_approximated_stack_root(next);
         *self.over_approximated_stack_roots = Some(gc_ref);
     }
 
