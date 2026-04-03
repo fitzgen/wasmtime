@@ -174,51 +174,33 @@ impl FreeList {
             })
     }
 
-    /// Find the first free block that can hold an allocation of the given size
-    /// and remove it from the free list.
-    fn first_fit(&mut self, alloc_size: u32) -> Option<(u32, u32)> {
+    /// Find the first free block that can hold an allocation of the given size,
+    /// split it if possible (modifying the block in place), and return the
+    /// allocated block's index.
+    ///
+    /// When splitting, the remainder stays at the same Vec position (since its
+    /// index is still between the previous and next blocks), avoiding an O(n)
+    /// remove + O(n) insert. Only exact-fit blocks require a Vec::remove.
+    fn first_fit_and_split(&mut self, alloc_size: u32) -> Option<u32> {
         debug_assert_eq!(alloc_size % ALIGN_U32, 0);
 
         let pos = self.blocks.iter().position(|&(_, len)| len >= alloc_size)?;
-        let (block_index, block_len) = self.blocks.remove(pos);
+        let (block_index, block_len) = self.blocks[pos];
 
         debug_assert_eq!(block_index % ALIGN_U32, 0);
         debug_assert_eq!(block_len % ALIGN_U32, 0);
 
-        Some((block_index, block_len))
-    }
-
-    /// If the given allocated block is large enough such that we can split it
-    /// and still have enough space left for future allocations, then split it.
-    ///
-    /// Returns the new length of the allocated block.
-    fn maybe_split(&mut self, alloc_size: u32, block_index: u32, block_len: u32) -> u32 {
-        debug_assert_eq!(alloc_size % ALIGN_U32, 0);
-        debug_assert_eq!(block_index % ALIGN_U32, 0);
-        debug_assert_eq!(block_len % ALIGN_U32, 0);
-
-        if block_len - alloc_size < ALIGN_U32 {
-            // The block is not large enough to split.
-            return block_len;
+        if block_len - alloc_size >= ALIGN_U32 {
+            // Split: update the block in place to be the remainder.
+            // The remainder index (block_index + alloc_size) is still in sorted
+            // order since it's > block_index and < next block's index.
+            self.blocks[pos] = (block_index + alloc_size, block_len - alloc_size);
+        } else {
+            // Exact fit (or remainder too small to split): remove the block.
+            self.blocks.remove(pos);
         }
 
-        // The block is large enough to split. Split the block at exactly the
-        // requested allocation size and put the tail back in the free list.
-        let new_block_len = alloc_size;
-        let split_start = block_index + alloc_size;
-        let split_len = block_len - alloc_size;
-
-        debug_assert_eq!(new_block_len % ALIGN_U32, 0);
-        debug_assert_eq!(split_start % ALIGN_U32, 0);
-        debug_assert_eq!(split_len % ALIGN_U32, 0);
-
-        let pos = self
-            .blocks
-            .binary_search_by_key(&split_start, |&(idx, _)| idx)
-            .unwrap_err();
-        self.blocks.insert(pos, (split_start, split_len));
-
-        new_block_len
+        Some(block_index)
     }
 
     /// Allocate space for an object of the given layout.
@@ -236,18 +218,12 @@ impl FreeList {
         let alloc_size = self.check_layout(layout)?;
         debug_assert_eq!(alloc_size % ALIGN_U32, 0);
 
-        let (block_index, block_len) = match self.first_fit(alloc_size) {
+        let block_index = match self.first_fit_and_split(alloc_size) {
             None => return Ok(None),
-            Some(tup) => tup,
+            Some(idx) => idx,
         };
         debug_assert_ne!(block_index, 0);
         debug_assert_eq!(block_index % ALIGN_U32, 0);
-        debug_assert!(block_len >= alloc_size);
-        debug_assert_eq!(block_len % ALIGN_U32, 0);
-
-        let block_len = self.maybe_split(alloc_size, block_index, block_len);
-        debug_assert!(block_len >= alloc_size);
-        debug_assert_eq!(block_len % ALIGN_U32, 0);
 
         // After we've mutated the free list, double check its integrity.
         #[cfg(debug_assertions)]
