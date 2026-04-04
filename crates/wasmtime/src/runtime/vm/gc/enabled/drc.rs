@@ -329,10 +329,15 @@ impl DrcHeap {
                 // tail processing. All other children are pushed to the stack.
                 let mut tail_child = None;
                 if let Some(ty) = ty {
-                    match self.trace_infos[ty.bits() as usize]
-                        .as_ref()
-                        .expect("should have trace info")
-                    {
+                    // SAFETY: ty was written by ensure_trace_info which
+                    // guarantees the index exists and is Some.
+                    let trace_info = unsafe {
+                        self.trace_infos
+                            .get_unchecked(ty.bits() as usize)
+                            .as_ref()
+                            .unwrap_unchecked()
+                    };
+                    match trace_info {
                         TraceInfo::Struct { gc_ref_offsets } => {
                             // Read gc_ref fields using the cached heap base
                             // pointer and unchecked pointer access.
