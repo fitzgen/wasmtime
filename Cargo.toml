@@ -696,6 +696,7 @@ opt-level = 's'
 [profile.profiling]
 inherits = "bench"
 debug = "line-tables-only"
+lto = true
 
 [profile.fastest-runtime]
 inherits = "release"
