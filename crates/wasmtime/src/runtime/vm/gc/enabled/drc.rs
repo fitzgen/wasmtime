@@ -111,7 +111,7 @@ enum TraceInfo {
 }
 
 /// A deferred reference-counting (DRC) heap.
-struct DrcHeap {
+pub(crate) struct DrcHeap {
     engine: EngineWeak,
 
     /// For every type that we have allocated in this heap, how do we trace it?
@@ -334,7 +334,6 @@ impl DrcHeap {
                         .expect("should have trace info")
                     {
                         TraceInfo::Struct { gc_ref_offsets } => {
-                            stack.reserve(gc_ref_offsets.len());
                             // Read gc_ref fields using the cached heap base
                             // pointer and unchecked pointer access.
                             for offset in gc_ref_offsets {
@@ -366,7 +365,6 @@ impl DrcHeap {
                             if *gc_ref_elems {
                                 let data = self.gc_object_data(&current);
                                 let len = self.array_len(current.as_arrayref_unchecked());
-                                stack.reserve(usize::try_from(len).unwrap());
                                 for i in 0..len {
                                     let elem_offset = GC_REF_ARRAY_ELEMS_OFFSET
                                         + i * u32::try_from(mem::size_of::<u32>()).unwrap();
