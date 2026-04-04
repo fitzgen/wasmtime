@@ -303,7 +303,8 @@ impl DrcHeap {
 
                 // SAFETY: current is a non-i31 gc_ref that was allocated by us,
                 // so it always has a valid heap index.
-                let start = unsafe { current.as_heap_index().unwrap_unchecked() }.get() as usize;
+                let index = unsafe { current.as_heap_index().unwrap_unchecked() };
+                let start = index.get() as usize;
 
                 // Read the DRC header directly via the cached heap base pointer,
                 // skipping the two bounds checks in index_mut.
@@ -409,7 +410,6 @@ impl DrcHeap {
 
                 // Deallocate using the object_size we already read.
                 let alloc_size = FreeList::aligned_size(object_size);
-                let index = unsafe { current.as_heap_index().unwrap_unchecked() };
 
                 if cfg!(gc_zeal) {
                     let idx = usize::try_from(index.get()).unwrap();
@@ -1181,10 +1181,21 @@ unsafe impl GcHeap for DrcHeap {
 
         let raw = gc_ref.as_raw_non_zero_u32();
 
-        // Write header and expose in one go, avoiding separate vtable call.
+        // Write header with OASR bit pre-set and next pointer already filled,
+        // avoiding the read-modify-write cycle of setting the bit after writing.
         let next = self.over_approximated_stack_roots
             .as_ref()
             .map(|r| r.unchecked_copy());
+
+        // Pre-set the OASR bit on the header before writing to heap.
+        // SAFETY: HEADER_IN_OVER_APPROX_LIST_BIT fits in 26 bits and the
+        // header's reserved bits are asserted to be 0 above.
+        let mut oasr_header = header;
+        unsafe {
+            oasr_header.unchecked_set_reserved_u26(
+                wasmtime_environ::drc::HEADER_IN_OVER_APPROX_LIST_BIT,
+            );
+        }
 
         // Use direct pointer access to skip index_mut bounds checks.
         // SAFETY: gc_ref was just allocated with at least VMDrcHeader size,
@@ -1197,14 +1208,11 @@ unsafe impl GcHeap for DrcHeap {
         let drc_header =
             unsafe { &mut *(heap_base.add(start) as *mut VMDrcHeader) };
         *drc_header = VMDrcHeader {
-            header,
+            header: oasr_header,
             ref_count: 1,
-            next_over_approximated_stack_root: None,
+            next_over_approximated_stack_root: next,
             object_size,
         };
-        // expose_gc_ref_to_wasm inline: push onto over-approximated stack roots.
-        drc_header.set_in_over_approximated_stack_roots_bit(true);
-        drc_header.set_next_over_approximated_stack_root(next);
         self.over_approximated_stack_roots = Some(gc_ref);
 
         Ok(Ok(raw))
