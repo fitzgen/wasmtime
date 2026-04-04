@@ -247,6 +247,13 @@ impl DrcHeap {
         debug_assert!(stack.is_empty());
         stack.push(gc_ref.unchecked_copy());
 
+        // Cache the heap base pointer once. The heap doesn't grow or move
+        // during deallocation. This avoids calling vmmemory() (which does
+        // Option::unwrap + AtomicUsize::new) on every loop iteration.
+        let vmmemory = self.vmmemory();
+        let heap_base = vmmemory.base.as_ptr();
+        let _heap_len = vmmemory.current_length();
+
         while let Some(gc_ref) = stack.pop() {
             // Tail-call loop: process the last child of a struct inline
             // instead of pushing it to the stack, saving one push+pop per node.
@@ -266,9 +273,7 @@ impl DrcHeap {
                 // SAFETY: The gc_ref was allocated with at least VMDrcHeader
                 // size, and the heap base/len don't change during dealloc.
                 // The heap memory is disjoint from self's struct fields.
-                let vmmemory = self.vmmemory();
-                let heap_base = vmmemory.base.as_ptr();
-                debug_assert!(start + core::mem::size_of::<VMDrcHeader>() <= vmmemory.current_length());
+                debug_assert!(start + core::mem::size_of::<VMDrcHeader>() <= _heap_len);
                 let drc_header =
                     unsafe { &mut *(heap_base.add(start) as *mut VMDrcHeader) };
 
@@ -297,10 +302,8 @@ impl DrcHeap {
                     {
                         TraceInfo::Struct { gc_ref_offsets } => {
                             stack.reserve(gc_ref_offsets.len());
-                            // Read gc_ref fields using unchecked pointer access
-                            // to skip bounds checks. The heap base is re-read
-                            // since self was borrowed for trace_infos above.
-                            let heap_base = self.vmmemory().base.as_ptr() as *const u8;
+                            // Read gc_ref fields using the cached heap base
+                            // pointer and unchecked pointer access.
                             for offset in gc_ref_offsets {
                                 let off = *offset as usize;
                                 // SAFETY: offset is within the allocated object
