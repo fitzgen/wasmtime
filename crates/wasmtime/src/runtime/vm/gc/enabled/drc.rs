@@ -287,7 +287,10 @@ impl DrcHeap {
         // tail optimization), the stack never exceeds ~21 entries. For rare
         // overflow (e.g., large arrays of gc_refs), fall back to self.dec_ref_stack.
         const FAST_STACK_CAP: usize = 64;
-        let mut fast_stack = [0u32; FAST_STACK_CAP];
+        // Use MaybeUninit to avoid zeroing 256 bytes (16 movaps instructions).
+        // We never read before writing, and only read indices < fast_len.
+        let mut fast_stack: [core::mem::MaybeUninit<u32>; FAST_STACK_CAP] =
+            unsafe { core::mem::MaybeUninit::uninit().assume_init() };
         let mut fast_len: usize = 0;
 
         // Raw pointer to self.dec_ref_stack for overflow. SAFETY: dec_ref_stack
@@ -306,8 +309,8 @@ impl DrcHeap {
             ($child:expr) => {
                 if fast_len < FAST_STACK_CAP {
                     unsafe {
-                        *fast_stack.get_unchecked_mut(fast_len) =
-                            $child.as_raw_non_zero_u32().get();
+                        fast_stack.get_unchecked_mut(fast_len)
+                            .write($child.as_raw_non_zero_u32().get());
                     }
                     fast_len += 1;
                 } else {
@@ -469,7 +472,7 @@ impl DrcHeap {
                 current = next;
             } else if fast_len > 0 {
                 fast_len -= 1;
-                let raw = unsafe { *fast_stack.get_unchecked(fast_len) };
+                let raw = unsafe { fast_stack.get_unchecked(fast_len).assume_init_read() };
                 // SAFETY: we only push non-zero values from VMGcRef.
                 current = unsafe {
                     VMGcRef::from_raw_non_zero_u32(NonZeroU32::new_unchecked(raw))
