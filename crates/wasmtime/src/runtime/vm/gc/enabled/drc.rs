@@ -283,6 +283,12 @@ impl DrcHeap {
         let mut stack = core::mem::take(&mut self.dec_ref_stack);
         debug_assert!(stack.is_empty());
 
+        // Cache pointer to free_list so we don't reload through self's Option
+        // on every iteration.
+        // SAFETY: free_list is always Some after heap initialization.
+        let free_list_ptr: *mut FreeList =
+            unsafe { self.free_list.as_mut().unwrap_unchecked() as *mut FreeList };
+
         // Process gc_ref directly. Enter the tail-call processing loop
         // with gc_ref as the first item. Its ref_count was set back to 1 by the
         // caller so we can uniformly decrement here.
@@ -411,8 +417,8 @@ impl DrcHeap {
                         .fill(POISON);
                 }
 
-                // SAFETY: free_list is always Some after heap initialization.
-                unsafe { self.free_list.as_mut().unwrap_unchecked() }
+                // SAFETY: free_list_ptr is valid for the lifetime of this function.
+                unsafe { &mut *free_list_ptr }
                     .dealloc_fast(index, alloc_size);
 
                 // Process the last child inline instead of via stack.
