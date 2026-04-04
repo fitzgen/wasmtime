@@ -248,67 +248,49 @@ impl DrcHeap {
         stack.push(gc_ref.unchecked_copy());
 
         while let Some(gc_ref) = stack.pop() {
-            if gc_ref.is_i31() {
-                continue;
-            }
+            // Tail-call loop: process the last child of a struct inline
+            // instead of pushing it to the stack, saving one push+pop per node.
+            let mut current = gc_ref;
+            loop {
+                if current.is_i31() {
+                    break;
+                }
 
-            // Read the DRC header once to get ref_count, type, and object_size.
-            let drc_header = self.index_mut(drc_ref(&gc_ref));
-            debug_assert_ne!(
-                drc_header.ref_count, 0,
-                "{:#p} is supposedly live; should have nonzero ref count",
-                gc_ref
-            );
-            drc_header.ref_count -= 1;
-            if drc_header.ref_count != 0 {
-                continue;
-            }
+                // Read the DRC header once to get ref_count, type, and object_size.
+                let drc_header = self.index_mut(drc_ref(&current));
+                debug_assert_ne!(
+                    drc_header.ref_count, 0,
+                    "{:#p} is supposedly live; should have nonzero ref count",
+                    current
+                );
+                drc_header.ref_count -= 1;
+                if drc_header.ref_count != 0 {
+                    break;
+                }
 
-            // Ref count reached zero. Extract type and size from the header
-            // we already read (avoiding re-reading from heap).
-            let ty = drc_header.header.ty();
-            let object_size = drc_header.object_size;
+                // Ref count reached zero. Extract type and size from the header
+                // we already read (avoiding re-reading from heap).
+                let ty = drc_header.header.ty();
+                let object_size = drc_header.object_size;
 
-            // Trace: enqueue child GC refs for dec-ref'ing.
-            if let Some(ty) = ty {
-                match self.trace_infos[ty.bits() as usize]
-                    .as_ref()
-                    .expect("should have trace info")
-                {
-                    TraceInfo::Struct { gc_ref_offsets } => {
-                        stack.reserve(gc_ref_offsets.len());
-                        // Read gc_ref fields directly from the heap slice,
-                        // avoiding the gc_object_data → object_range → object_size
-                        // overhead.
-                        let start =
-                            usize::try_from(gc_ref.as_heap_index().unwrap().get()).unwrap();
-                        let heap = self.heap_slice();
-                        for offset in gc_ref_offsets {
-                            let off = usize::try_from(*offset).unwrap();
-                            let bytes: [u8; 4] =
-                                heap[start + off..start + off + 4].try_into().unwrap();
-                            let raw = u32::from_le_bytes(bytes);
-                            if let Some(child) = VMGcRef::from_raw_u32(raw)
-                                && !child.is_i31()
-                            {
-                                debug_assert!({
-                                    let header = self.header(&child);
-                                    let kind = header.kind().as_u32();
-                                    VMGcKind::try_from_u32(kind).is_some()
-                                });
-                                stack.push(child);
-                            }
-                        }
-                    }
-                    TraceInfo::Array { gc_ref_elems } => {
-                        if *gc_ref_elems {
-                            let data = self.gc_object_data(&gc_ref);
-                            let len = self.array_len(gc_ref.as_arrayref_unchecked());
-                            stack.reserve(usize::try_from(len).unwrap());
-                            for i in 0..len {
-                                let elem_offset = GC_REF_ARRAY_ELEMS_OFFSET
-                                    + i * u32::try_from(mem::size_of::<u32>()).unwrap();
-                                let raw = data.read_u32(elem_offset);
+                // Trace: find children and collect the last valid child for
+                // tail processing. All other children are pushed to the stack.
+                let mut tail_child = None;
+                if let Some(ty) = ty {
+                    match self.trace_infos[ty.bits() as usize]
+                        .as_ref()
+                        .expect("should have trace info")
+                    {
+                        TraceInfo::Struct { gc_ref_offsets } => {
+                            stack.reserve(gc_ref_offsets.len());
+                            let start =
+                                usize::try_from(current.as_heap_index().unwrap().get()).unwrap();
+                            let heap = self.heap_slice();
+                            for offset in gc_ref_offsets {
+                                let off = usize::try_from(*offset).unwrap();
+                                let bytes: [u8; 4] =
+                                    heap[start + off..start + off + 4].try_into().unwrap();
+                                let raw = u32::from_le_bytes(bytes);
                                 if let Some(child) = VMGcRef::from_raw_u32(raw)
                                     && !child.is_i31()
                                 {
@@ -317,37 +299,72 @@ impl DrcHeap {
                                         let kind = header.kind().as_u32();
                                         VMGcKind::try_from_u32(kind).is_some()
                                     });
-                                    stack.push(child);
+                                    // Keep replacing tail_child; previous one
+                                    // goes to the stack.
+                                    if let Some(prev) = tail_child.replace(child) {
+                                        stack.push(prev);
+                                    }
+                                }
+                            }
+                        }
+                        TraceInfo::Array { gc_ref_elems } => {
+                            if *gc_ref_elems {
+                                let data = self.gc_object_data(&current);
+                                let len = self.array_len(current.as_arrayref_unchecked());
+                                stack.reserve(usize::try_from(len).unwrap());
+                                for i in 0..len {
+                                    let elem_offset = GC_REF_ARRAY_ELEMS_OFFSET
+                                        + i * u32::try_from(mem::size_of::<u32>()).unwrap();
+                                    let raw = data.read_u32(elem_offset);
+                                    if let Some(child) = VMGcRef::from_raw_u32(raw)
+                                        && !child.is_i31()
+                                    {
+                                        debug_assert!({
+                                            let header = self.header(&child);
+                                            let kind = header.kind().as_u32();
+                                            VMGcKind::try_from_u32(kind).is_some()
+                                        });
+                                        if let Some(prev) = tail_child.replace(child) {
+                                            stack.push(prev);
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
-                }
-            } else {
-                debug_assert!(drc_header.header.kind().matches(VMGcKind::ExternRef));
+                } else {
+                    debug_assert!(drc_header.header.kind().matches(VMGcKind::ExternRef));
 
-                // Handle externref host data. Only externrefs have host data,
-                // and ty is None only for externrefs, so we skip this for
-                // struct/array objects entirely.
-                if let Some(externref) = gc_ref.as_typed::<VMDrcExternRef>(self) {
-                    let host_data_id = self.index(externref).host_data;
-                    host_data_table.dealloc(host_data_id);
+                    // Handle externref host data. Only externrefs have host data,
+                    // and ty is None only for externrefs, so we skip this for
+                    // struct/array objects entirely.
+                    if let Some(externref) = current.as_typed::<VMDrcExternRef>(self) {
+                        let host_data_id = self.index(externref).host_data;
+                        host_data_table.dealloc(host_data_id);
+                    }
+                }
+
+                // Deallocate using the object_size we already read.
+                let alloc_size = FreeList::aligned_size(object_size);
+                let index = current.as_heap_index().unwrap();
+
+                if cfg!(gc_zeal) {
+                    let idx = usize::try_from(index.get()).unwrap();
+                    self.heap_slice_mut()[idx..][..usize::try_from(alloc_size).unwrap()]
+                        .fill(POISON);
+                }
+
+                self.free_list
+                    .as_mut()
+                    .unwrap()
+                    .dealloc_fast(index, alloc_size);
+
+                // Process the last child inline instead of via stack.
+                match tail_child {
+                    Some(child) => current = child,
+                    None => break,
                 }
             }
-
-            // Deallocate using the object_size we already read.
-            let alloc_size = FreeList::aligned_size(object_size);
-            let index = gc_ref.as_heap_index().unwrap();
-
-            if cfg!(gc_zeal) {
-                let idx = usize::try_from(index.get()).unwrap();
-                self.heap_slice_mut()[idx..][..usize::try_from(alloc_size).unwrap()].fill(POISON);
-            }
-
-            self.free_list
-                .as_mut()
-                .unwrap()
-                .dealloc_fast(index, alloc_size);
         }
 
         debug_assert!(stack.is_empty());

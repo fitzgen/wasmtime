@@ -706,32 +706,38 @@ fn gc_alloc_raw(
     #[cfg(not(gc_zeal))]
     {
         let opaque = store.store_opaque_mut();
+        let cache_key = (kind_and_reserved as u64) << 32 | module_interned_type_index as u64;
+
+        // Fast path for cache hit: single try_gc_store_mut borrow covers
+        // cache check + allocation, avoiding repeated Option checks.
+        if let Some(gc_store) = opaque.try_gc_store_mut() {
+            if gc_store.alloc_header_cache.0 == cache_key {
+                let header = gc_store.alloc_header_cache.1;
+                debug_assert!((align as usize).is_power_of_two());
+                let layout =
+                    unsafe { Layout::from_size_align_unchecked(size as usize, align as usize) };
+                if let Ok(raw) = gc_store.alloc_raw_and_expose(header, layout)? {
+                    return Ok(raw);
+                }
+            }
+        }
+
+        // Cache miss or alloc failure: resolve type, update cache, try again.
         if opaque.try_gc_store_mut().is_some() {
-            // Pack kind_and_reserved + module_interned_type_index into a u64 cache key.
-            let cache_key =
-                (kind_and_reserved as u64) << 32 | module_interned_type_index as u64;
+            let shared_type_index = opaque
+                .instance(instance)
+                .engine_type_index(ModuleInternedTypeIndex::from_u32(
+                    module_interned_type_index,
+                ));
+            // SAFETY: kind_and_reserved comes from Cranelift-compiled code
+            // which ensures the upper 6 bits are a valid VMGcKind.
+            let header =
+                unsafe { VMGcHeader::from_raw_u32_and_index(kind_and_reserved, shared_type_index) };
             let gc_store = opaque.try_gc_store_mut().unwrap();
-            let header = if gc_store.alloc_header_cache.0 == cache_key {
-                gc_store.alloc_header_cache.1
-            } else {
-                let shared_type_index = opaque
-                    .instance(instance)
-                    .engine_type_index(ModuleInternedTypeIndex::from_u32(
-                        module_interned_type_index,
-                    ));
-                // SAFETY: kind_and_reserved comes from Cranelift-compiled code
-                // which ensures the upper 6 bits are a valid VMGcKind.
-                let header =
-                    unsafe { VMGcHeader::from_raw_u32_and_index(kind_and_reserved, shared_type_index) };
-                let gc_store = opaque.try_gc_store_mut().unwrap();
-                gc_store.alloc_header_cache = (cache_key, header);
-                header
-            };
-            let size_usize = size as usize;
-            let align_usize = align as usize;
-            debug_assert!(align_usize.is_power_of_two());
-            let layout = unsafe { Layout::from_size_align_unchecked(size_usize, align_usize) };
-            let gc_store = opaque.try_gc_store_mut().unwrap();
+            gc_store.alloc_header_cache = (cache_key, header);
+            debug_assert!((align as usize).is_power_of_two());
+            let layout =
+                unsafe { Layout::from_size_align_unchecked(size as usize, align as usize) };
             if let Ok(raw) = gc_store.alloc_raw_and_expose(header, layout)? {
                 return Ok(raw);
             }
