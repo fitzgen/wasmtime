@@ -245,22 +245,41 @@ impl DrcHeap {
         host_data_table: &mut ExternRefHostDataTable,
         gc_ref: &VMGcRef,
     ) {
-        // SAFETY: dec_ref_stack is always Some except during dec_ref processing.
-        let mut stack = unsafe { self.dec_ref_stack.take().unwrap_unchecked() };
-        debug_assert!(stack.is_empty());
-        stack.push(gc_ref.unchecked_copy());
+        // Fast path: if this is a non-i31 ref and the ref count stays above
+        // zero, we can just decrement and return without touching the
+        // dec_ref_stack at all. This avoids the take/put and stack push/pop
+        // overhead for the common case where ref_count goes 2→1.
+        if gc_ref.is_i31() {
+            return;
+        }
 
-        // Cache the heap base pointer once. The heap doesn't grow or move
-        // during deallocation. This avoids calling vmmemory() (which does
-        // Option::unwrap + AtomicUsize::new) on every loop iteration.
         let vmmemory = self.vmmemory();
         let heap_base = vmmemory.base.as_ptr();
         let _heap_len = vmmemory.current_length();
+        let start = unsafe { gc_ref.as_heap_index().unwrap_unchecked() }.get() as usize;
+        debug_assert!(start + core::mem::size_of::<VMDrcHeader>() <= _heap_len);
+        let drc_header =
+            unsafe { &mut *(heap_base.add(start) as *mut VMDrcHeader) };
+        debug_assert_ne!(drc_header.ref_count, 0);
+        drc_header.ref_count -= 1;
+        if drc_header.ref_count != 0 {
+            return;
+        }
 
-        while let Some(gc_ref) = stack.pop() {
+        // Ref count reached zero. Now we need the stack for cascading.
+        // SAFETY: dec_ref_stack is always Some except during dec_ref processing.
+        let mut stack = unsafe { self.dec_ref_stack.take().unwrap_unchecked() };
+        debug_assert!(stack.is_empty());
+
+        // Process gc_ref directly (we already decremented and know rc == 0).
+        // Enter the tail-call processing loop with gc_ref as the first item.
+        let mut current = gc_ref.unchecked_copy();
+        // The first current already had its ref_count decremented to 0 above.
+        // For subsequent items from the stack, we need to decrement.
+        let mut already_decremented = true;
+        'outer: loop {
             // Tail-call loop: process the last child of a struct inline
             // instead of pushing it to the stack, saving one push+pop per node.
-            let mut current = gc_ref;
             loop {
                 if current.is_i31() {
                     break;
@@ -280,15 +299,18 @@ impl DrcHeap {
                 let drc_header =
                     unsafe { &mut *(heap_base.add(start) as *mut VMDrcHeader) };
 
-                debug_assert_ne!(
-                    drc_header.ref_count, 0,
-                    "{:#p} is supposedly live; should have nonzero ref count",
-                    current
-                );
-                drc_header.ref_count -= 1;
-                if drc_header.ref_count != 0 {
-                    break;
+                if !already_decremented {
+                    debug_assert_ne!(
+                        drc_header.ref_count, 0,
+                        "{:#p} is supposedly live; should have nonzero ref count",
+                        current
+                    );
+                    drc_header.ref_count -= 1;
+                    if drc_header.ref_count != 0 {
+                        break;
+                    }
                 }
+                already_decremented = false;
 
                 // Ref count reached zero. Extract type and size from the header
                 // we already read (avoiding re-reading from heap).
@@ -388,6 +410,12 @@ impl DrcHeap {
                     Some(child) => current = child,
                     None => break,
                 }
+            }
+
+            // Pop the next item from the stack, or finish.
+            match stack.pop() {
+                Some(next) => current = next,
+                None => break 'outer,
             }
         }
 
