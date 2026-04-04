@@ -256,8 +256,22 @@ impl DrcHeap {
                     break;
                 }
 
-                // Read the DRC header once to get ref_count, type, and object_size.
-                let drc_header = self.index_mut(drc_ref(&current));
+                // SAFETY: current is a non-i31 gc_ref that was allocated by us,
+                // so it always has a valid heap index.
+                let start = current.as_heap_index().unwrap().get() as usize;
+
+                // Read the DRC header directly via the cached heap base pointer,
+                // skipping the two bounds checks in index_mut.
+                //
+                // SAFETY: The gc_ref was allocated with at least VMDrcHeader
+                // size, and the heap base/len don't change during dealloc.
+                // The heap memory is disjoint from self's struct fields.
+                let vmmemory = self.vmmemory();
+                let heap_base = vmmemory.base.as_ptr();
+                debug_assert!(start + core::mem::size_of::<VMDrcHeader>() <= vmmemory.current_length());
+                let drc_header =
+                    unsafe { &mut *(heap_base.add(start) as *mut VMDrcHeader) };
+
                 debug_assert_ne!(
                     drc_header.ref_count, 0,
                     "{:#p} is supposedly live; should have nonzero ref count",
@@ -283,14 +297,19 @@ impl DrcHeap {
                     {
                         TraceInfo::Struct { gc_ref_offsets } => {
                             stack.reserve(gc_ref_offsets.len());
-                            let start =
-                                usize::try_from(current.as_heap_index().unwrap().get()).unwrap();
-                            let heap = self.heap_slice();
+                            // Read gc_ref fields using unchecked pointer access
+                            // to skip bounds checks. The heap base is re-read
+                            // since self was borrowed for trace_infos above.
+                            let heap_base = self.vmmemory().base.as_ptr() as *const u8;
                             for offset in gc_ref_offsets {
-                                let off = usize::try_from(*offset).unwrap();
-                                let bytes: [u8; 4] =
-                                    heap[start + off..start + off + 4].try_into().unwrap();
-                                let raw = u32::from_le_bytes(bytes);
+                                let off = *offset as usize;
+                                // SAFETY: offset is within the allocated object
+                                // which is within the heap bounds.
+                                let raw = unsafe {
+                                    core::ptr::read_unaligned(
+                                        heap_base.add(start + off) as *const u32,
+                                    )
+                                };
                                 if let Some(child) = VMGcRef::from_raw_u32(raw)
                                     && !child.is_i31()
                                 {
