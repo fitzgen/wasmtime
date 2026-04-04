@@ -152,6 +152,10 @@ struct DrcHeap {
     /// behind an empty vec instead of `None`) but we keep it because it will
     /// help us catch unexpected re-entry, similar to how a `RefCell` would.
     dec_ref_stack: Option<Vec<VMGcRef>>,
+
+    /// Cached type index for which ensure_trace_info was last called.
+    /// Avoids repeated lookups when allocating the same type repeatedly.
+    last_ensured_trace_info_ty: Option<VMSharedTypeIndex>,
 }
 
 impl DrcHeap {
@@ -167,6 +171,7 @@ impl DrcHeap {
             vmmemory: None,
             free_list: None,
             dec_ref_stack: Some(Vec::with_capacity(1)),
+            last_ensured_trace_info_ty: None,
         })
     }
 
@@ -351,13 +356,24 @@ impl DrcHeap {
     }
 
     /// Ensure that we have tracing information for the given type.
+    #[inline]
     fn ensure_trace_info(&mut self, ty: VMSharedTypeIndex) {
+        if self.last_ensured_trace_info_ty == Some(ty) {
+            return;
+        }
+        self.ensure_trace_info_slow(ty);
+    }
+
+    #[inline(never)]
+    fn ensure_trace_info_slow(&mut self, ty: VMSharedTypeIndex) {
         let idx = ty.bits() as usize;
         if idx < self.trace_infos.len() && self.trace_infos[idx].is_some() {
+            self.last_ensured_trace_info_ty = Some(ty);
             return;
         }
 
         self.insert_new_trace_info(ty);
+        self.last_ensured_trace_info_ty = Some(ty);
     }
 
     fn insert_new_trace_info(&mut self, ty: VMSharedTypeIndex) {
@@ -856,6 +872,7 @@ unsafe impl GcHeap for DrcHeap {
             // to clear out our tracing info just to fill it back in with the
             // same exact stuff.
             trace_infos: _,
+            last_ensured_trace_info_ty: _,
         } = self;
 
         *no_gc_count = 0;
