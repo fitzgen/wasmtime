@@ -1058,7 +1058,9 @@ unsafe impl GcHeap for DrcHeap {
         // SAFETY: free_list is always Some after heap initialization.
         let gc_ref = match unsafe { self.free_list.as_mut().unwrap_unchecked() }.alloc_fast(alloc_size) {
             None => return Ok(Err(u64::try_from(layout.size()).unwrap())),
-            Some(index) => VMGcRef::from_heap_index(index).unwrap(),
+            // SAFETY: FreeList uses ALIGN=16, so heap indices have bit 0
+            // clear and are always valid non-i31 gc refs.
+            Some(index) => VMGcRef::from_raw_non_zero_u32(index),
         };
 
         // Assert that the newly-allocated memory is still filled with the
@@ -1075,8 +1077,9 @@ unsafe impl GcHeap for DrcHeap {
         }
 
         // Use direct pointer access to skip index_mut bounds checks.
-        // SAFETY: gc_ref was just allocated with at least VMDrcHeader size.
-        let start = gc_ref.as_heap_index().unwrap().get() as usize;
+        // SAFETY: gc_ref was just allocated with at least VMDrcHeader size,
+        // and is a non-i31 heap ref (FreeList uses ALIGN=16).
+        let start = unsafe { gc_ref.as_heap_index().unwrap_unchecked() }.get() as usize;
         let vmmemory = self.vmmemory();
         debug_assert!(start + core::mem::size_of::<VMDrcHeader>() <= vmmemory.current_length());
         unsafe {
@@ -1108,7 +1111,7 @@ unsafe impl GcHeap for DrcHeap {
 
         let gc_ref = match unsafe { self.free_list.as_mut().unwrap_unchecked() }.alloc_fast(alloc_size) {
             None => return Ok(Err(u64::try_from(layout.size()).unwrap())),
-            Some(index) => VMGcRef::from_heap_index(index).unwrap(),
+            Some(index) => VMGcRef::from_raw_non_zero_u32(index),
         };
 
         if cfg!(gc_zeal) {
@@ -1131,7 +1134,7 @@ unsafe impl GcHeap for DrcHeap {
         // Use direct pointer access to skip index_mut bounds checks.
         // SAFETY: gc_ref was just allocated with at least VMDrcHeader size,
         // and the heap memory is disjoint from self's struct fields.
-        let start = gc_ref.as_heap_index().unwrap().get() as usize;
+        let start = unsafe { gc_ref.as_heap_index().unwrap_unchecked() }.get() as usize;
         let vmmemory = self.vmmemory();
         debug_assert!(start + core::mem::size_of::<VMDrcHeader>() <= vmmemory.current_length());
         let drc_header =
