@@ -1184,11 +1184,13 @@ unsafe impl GcHeap for DrcHeap {
         // Use direct pointer access to skip index_mut bounds checks.
         // SAFETY: gc_ref was just allocated with at least VMDrcHeader size,
         // and the heap memory is disjoint from self's struct fields.
+        // vmmemory is always Some when the heap is attached (which it must be
+        // for allocation to succeed).
         let start = unsafe { gc_ref.as_heap_index().unwrap_unchecked() }.get() as usize;
-        let vmmemory = self.vmmemory();
-        debug_assert!(start + core::mem::size_of::<VMDrcHeader>() <= vmmemory.current_length());
+        let vmmemory = unsafe { self.vmmemory.as_ref().unwrap_unchecked() };
+        let heap_base = vmmemory.base.as_ptr();
         let drc_header =
-            unsafe { &mut *(vmmemory.base.as_ptr().add(start) as *mut VMDrcHeader) };
+            unsafe { &mut *(heap_base.add(start) as *mut VMDrcHeader) };
         *drc_header = VMDrcHeader {
             header,
             ref_count: 1,
