@@ -151,7 +151,7 @@ pub(crate) struct DrcHeap {
     /// remove the `Option` and, when we take the stack out of `self`, leave
     /// behind an empty vec instead of `None`) but we keep it because it will
     /// help us catch unexpected re-entry, similar to how a `RefCell` would.
-    dec_ref_stack: Option<Vec<VMGcRef>>,
+    dec_ref_stack: Vec<VMGcRef>,
 
     /// Cached type index for which ensure_trace_info was last called.
     /// Avoids repeated lookups when allocating the same type repeatedly.
@@ -170,7 +170,7 @@ impl DrcHeap {
             memory: None,
             vmmemory: None,
             free_list: None,
-            dec_ref_stack: Some(Vec::with_capacity(1)),
+            dec_ref_stack: Vec::with_capacity(1),
             last_ensured_trace_info_ty: u32::MAX,
         })
     }
@@ -280,8 +280,7 @@ impl DrcHeap {
         heap_base: *mut u8,
         _heap_len: usize,
     ) {
-        // SAFETY: dec_ref_stack is always Some except during dec_ref processing.
-        let mut stack = unsafe { self.dec_ref_stack.take().unwrap_unchecked() };
+        let mut stack = core::mem::take(&mut self.dec_ref_stack);
         debug_assert!(stack.is_empty());
 
         // Process gc_ref directly. Enter the tail-call processing loop
@@ -431,8 +430,7 @@ impl DrcHeap {
         }
 
         debug_assert!(stack.is_empty());
-        debug_assert!(self.dec_ref_stack.is_none());
-        self.dec_ref_stack = Some(stack);
+        self.dec_ref_stack = stack;
     }
 
     /// Ensure that we have tracing information for the given type.
@@ -977,7 +975,7 @@ unsafe impl GcHeap for DrcHeap {
         **over_approximated_stack_roots = None;
         *free_list = None;
         *vmmemory = None;
-        debug_assert!(dec_ref_stack.as_ref().is_some_and(|s| s.is_empty()));
+        debug_assert!(dec_ref_stack.is_empty());
 
         memory.take().unwrap()
     }
