@@ -1130,10 +1130,11 @@ unsafe impl GcHeap for DrcHeap {
         // SAFETY: gc_ref was just allocated with at least VMDrcHeader size,
         // and is a non-i31 heap ref (FreeList uses ALIGN=16).
         let start = unsafe { gc_ref.as_heap_index().unwrap_unchecked() }.get() as usize;
-        let vmmemory = self.vmmemory();
-        debug_assert!(start + core::mem::size_of::<VMDrcHeader>() <= vmmemory.current_length());
+        // SAFETY: vmmemory is always Some when the heap is attached.
+        let vmmemory = unsafe { self.vmmemory.as_ref().unwrap_unchecked() };
+        let heap_base = vmmemory.base.as_ptr();
         unsafe {
-            *(vmmemory.base.as_ptr().add(start) as *mut VMDrcHeader) = VMDrcHeader {
+            *(heap_base.add(start) as *mut VMDrcHeader) = VMDrcHeader {
                 header,
                 ref_count: 1,
                 next_over_approximated_stack_root: None,
@@ -1156,11 +1157,11 @@ unsafe impl GcHeap for DrcHeap {
             self.ensure_trace_info(ty);
         }
 
-        let object_size = u32::try_from(layout.size()).unwrap();
+        let object_size = layout.size() as u32;
         let alloc_size = FreeList::aligned_size(object_size);
 
         let gc_ref = match unsafe { self.free_list.as_mut().unwrap_unchecked() }.alloc_fast(alloc_size) {
-            None => return Ok(Err(u64::try_from(layout.size()).unwrap())),
+            None => return Ok(Err(layout.size() as u64)),
             Some(index) => VMGcRef::from_raw_non_zero_u32(index),
         };
 
