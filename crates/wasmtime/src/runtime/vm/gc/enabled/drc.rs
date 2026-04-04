@@ -741,7 +741,9 @@ impl DrcHeap {
 
         // Cache the heap base pointer outside the loop. The heap doesn't grow
         // or move during sweep/dec_ref processing.
-        let heap_base = self.vmmemory().base.as_ptr();
+        let vmmemory = self.vmmemory();
+        let heap_base = vmmemory.base.as_ptr();
+        let _heap_len = vmmemory.current_length();
 
         while let Some(gc_ref) = next {
             // Use direct pointer access to skip index_mut bounds checks.
@@ -772,7 +774,14 @@ impl DrcHeap {
                     prev_header.set_next_over_approximated_stack_root(next_oasr);
                 }
             }
-            self.dec_ref_and_maybe_dealloc(host_data_table, &gc_ref);
+            // Inline dec_ref: we already have the header, skip redundant
+            // i31 check, vmmemory load, and heap index conversion.
+            debug_assert_ne!(header.ref_count, 0);
+            header.ref_count -= 1;
+            if header.ref_count == 0 {
+                header.ref_count = 1;
+                self.dec_ref_cascade(host_data_table, &gc_ref, heap_base, _heap_len);
+            }
         }
     }
 }
