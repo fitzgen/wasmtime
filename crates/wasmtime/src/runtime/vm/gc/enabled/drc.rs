@@ -58,6 +58,7 @@ use core::{
     alloc::Layout,
     any::Any,
     mem,
+    num::NonZeroU32,
     ops::{Deref, DerefMut},
     ptr::NonNull,
 };
@@ -280,14 +281,40 @@ impl DrcHeap {
         heap_base: *mut u8,
         _heap_len: usize,
     ) {
-        let mut stack = core::mem::take(&mut self.dec_ref_stack);
-        debug_assert!(stack.is_empty());
+        // Use a fixed-size array on the function stack as a fast stack for
+        // non-tail children. This avoids Vec overhead (capacity checks, pointer
+        // indirection). For binary-trees (depth ~21, 2 children per node with
+        // tail optimization), the stack never exceeds ~21 entries. For rare
+        // overflow (e.g., large arrays of gc_refs), fall back to self.dec_ref_stack.
+        const FAST_STACK_CAP: usize = 64;
+        let mut fast_stack = [0u32; FAST_STACK_CAP];
+        let mut fast_len: usize = 0;
+
+        // Raw pointer to self.dec_ref_stack for overflow. SAFETY: dec_ref_stack
+        // is a separate field from free_list/trace_infos/heap, so no aliasing.
+        let overflow_ptr: *mut Vec<VMGcRef> = &mut self.dec_ref_stack;
+        debug_assert!(unsafe { &*overflow_ptr }.is_empty());
 
         // Cache pointer to free_list so we don't reload through self's Option
         // on every iteration.
         // SAFETY: free_list is always Some after heap initialization.
         let free_list_ptr: *mut FreeList =
             unsafe { self.free_list.as_mut().unwrap_unchecked() as *mut FreeList };
+
+        // Inline helper: push a non-tail child onto the stack.
+        macro_rules! stack_push {
+            ($child:expr) => {
+                if fast_len < FAST_STACK_CAP {
+                    unsafe {
+                        *fast_stack.get_unchecked_mut(fast_len) =
+                            $child.as_raw_non_zero_u32().get();
+                    }
+                    fast_len += 1;
+                } else {
+                    unsafe { &mut *overflow_ptr }.push($child);
+                }
+            };
+        }
 
         // Process gc_ref directly. Enter the tail-call processing loop
         // with gc_ref as the first item. Its ref_count was set back to 1 by the
@@ -367,7 +394,7 @@ impl DrcHeap {
                                     // Keep replacing tail_child; previous one
                                     // goes to the stack.
                                     if let Some(prev) = tail_child.replace(child) {
-                                        stack.push(prev);
+                                        stack_push!(prev);
                                     }
                                 }
                             }
@@ -389,7 +416,7 @@ impl DrcHeap {
                                             VMGcKind::try_from_u32(kind).is_some()
                                         });
                                         if let Some(prev) = tail_child.replace(child) {
-                                            stack.push(prev);
+                                            stack_push!(prev);
                                         }
                                     }
                                 }
@@ -429,14 +456,20 @@ impl DrcHeap {
             }
 
             // Pop the next item from the stack, or finish.
-            match stack.pop() {
-                Some(next) => current = next,
-                None => break 'outer,
+            // Check overflow Vec first, then fast stack.
+            if let Some(next) = unsafe { &mut *overflow_ptr }.pop() {
+                current = next;
+            } else if fast_len > 0 {
+                fast_len -= 1;
+                let raw = unsafe { *fast_stack.get_unchecked(fast_len) };
+                // SAFETY: we only push non-zero values from VMGcRef.
+                current = unsafe {
+                    VMGcRef::from_raw_non_zero_u32(NonZeroU32::new_unchecked(raw))
+                };
+            } else {
+                break 'outer;
             }
         }
-
-        debug_assert!(stack.is_empty());
-        self.dec_ref_stack = stack;
     }
 
     /// Ensure that we have tracing information for the given type.
