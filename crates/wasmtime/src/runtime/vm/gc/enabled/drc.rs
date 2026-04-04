@@ -125,7 +125,7 @@ pub(crate) struct DrcHeap {
     ///
     /// Note that this is exposed directly to compiled Wasm code through the
     /// vmctx, so must not move.
-    over_approximated_stack_roots: Box<Option<VMGcRef>>,
+    over_approximated_stack_roots: Option<VMGcRef>,
 
     /// The storage for the GC heap itself.
     memory: Option<crate::vm::Memory>,
@@ -166,7 +166,7 @@ impl DrcHeap {
             engine: engine.weak(),
             trace_infos: Vec::new(),
             no_gc_count: 0,
-            over_approximated_stack_roots: Box::new(None),
+            over_approximated_stack_roots: None,
             memory: None,
             vmmemory: None,
             free_list: None,
@@ -561,7 +561,7 @@ impl DrcHeap {
 
     /// Iterate over the over-approximated-stack-roots list.
     fn iter_over_approximated_stack_roots(&self) -> impl Iterator<Item = VMGcRef> + '_ {
-        let mut link = (*self.over_approximated_stack_roots)
+        let mut link = self.over_approximated_stack_roots
             .as_ref()
             .map(|r| r.unchecked_copy());
 
@@ -736,7 +736,7 @@ impl DrcHeap {
 
         // The `VMGcRef` of the next object in the over-approximated-stack-roots
         // list, if any.
-        let mut next = (*self.over_approximated_stack_roots)
+        let mut next = self.over_approximated_stack_roots
             .as_ref()
             .map(|r| r.unchecked_copy());
 
@@ -767,7 +767,7 @@ impl DrcHeap {
             next = next_oasr.as_ref().map(|r| r.unchecked_copy());
             header.set_in_over_approximated_stack_roots_bit(false);
             match &prev {
-                None => *self.over_approximated_stack_roots = next_oasr,
+                None => self.over_approximated_stack_roots = next_oasr,
                 Some(prev) => {
                     let prev_start = unsafe { prev.as_heap_index().unwrap_unchecked() }.get() as usize;
                     let prev_header =
@@ -972,7 +972,7 @@ unsafe impl GcHeap for DrcHeap {
         } = self;
 
         *no_gc_count = 0;
-        **over_approximated_stack_roots = None;
+        *over_approximated_stack_roots = None;
         *free_list = None;
         *vmmemory = None;
         debug_assert!(dec_ref_stack.is_empty());
@@ -1024,7 +1024,7 @@ unsafe impl GcHeap for DrcHeap {
 
     fn expose_gc_ref_to_wasm(&mut self, gc_ref: VMGcRef) {
         // Read the current list head before borrowing through index_mut.
-        let next = (*self.over_approximated_stack_roots)
+        let next = self.over_approximated_stack_roots
             .as_ref()
             .map(|r| r.unchecked_copy());
         let header = self.index_mut(drc_ref(&gc_ref));
@@ -1035,7 +1035,7 @@ unsafe impl GcHeap for DrcHeap {
         // list using a single index_mut call.
         header.set_in_over_approximated_stack_roots_bit(true);
         header.set_next_over_approximated_stack_root(next);
-        *self.over_approximated_stack_roots = Some(gc_ref);
+        self.over_approximated_stack_roots = Some(gc_ref);
     }
 
     fn alloc_externref(
@@ -1176,7 +1176,7 @@ unsafe impl GcHeap for DrcHeap {
         let raw = gc_ref.as_raw_non_zero_u32();
 
         // Write header and expose in one go, avoiding separate vtable call.
-        let next = (*self.over_approximated_stack_roots)
+        let next = self.over_approximated_stack_roots
             .as_ref()
             .map(|r| r.unchecked_copy());
 
@@ -1199,7 +1199,7 @@ unsafe impl GcHeap for DrcHeap {
         // expose_gc_ref_to_wasm inline: push onto over-approximated stack roots.
         drc_header.set_in_over_approximated_stack_roots_bit(true);
         drc_header.set_next_over_approximated_stack_root(next);
-        *self.over_approximated_stack_roots = Some(gc_ref);
+        self.over_approximated_stack_roots = Some(gc_ref);
 
         Ok(Ok(raw))
     }
@@ -1272,7 +1272,7 @@ unsafe impl GcHeap for DrcHeap {
     }
 
     unsafe fn vmctx_gc_heap_data(&self) -> NonNull<u8> {
-        let ptr: NonNull<Option<VMGcRef>> = NonNull::from(&*self.over_approximated_stack_roots);
+        let ptr: NonNull<Option<VMGcRef>> = NonNull::from(&self.over_approximated_stack_roots);
         ptr.cast()
     }
 
