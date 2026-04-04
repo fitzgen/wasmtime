@@ -263,11 +263,15 @@ impl FreeList {
         debug_assert_eq!(index % ALIGN_U32, 0);
         debug_assert_eq!(alloc_size % ALIGN_U32, 0);
 
-        // Find the insertion point via binary search.
-        let pos = self
-            .blocks
-            .binary_search_by_key(&index, |&(idx, _)| idx)
-            .unwrap_err();
+        // Find the insertion point via linear scan (free list is typically 1-5 blocks).
+        let blocks = &self.blocks;
+        let mut pos = blocks.len();
+        for i in 0..blocks.len() {
+            if unsafe { blocks.get_unchecked(i) }.0 > index {
+                pos = i;
+                break;
+            }
+        }
 
         let prev_block = if pos > 0 {
             Some(self.blocks[pos - 1])
