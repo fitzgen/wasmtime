@@ -703,13 +703,15 @@ impl DrcHeap {
             .as_ref()
             .map(|r| r.unchecked_copy());
 
+        // Cache the heap base pointer outside the loop. The heap doesn't grow
+        // or move during sweep/dec_ref processing.
+        let heap_base = self.vmmemory().base.as_ptr();
+
         while let Some(gc_ref) = next {
             // Use direct pointer access to skip index_mut bounds checks.
             // SAFETY: gc_ref points to a valid VMDrcHeader within the heap,
             // and the heap memory is disjoint from self's struct fields.
-            let start = gc_ref.as_heap_index().unwrap().get() as usize;
-            let heap_base = self.vmmemory().base.as_ptr();
-            debug_assert!(start + core::mem::size_of::<VMDrcHeader>() <= self.vmmemory().current_length());
+            let start = unsafe { gc_ref.as_heap_index().unwrap_unchecked() }.get() as usize;
             let header =
                 unsafe { &mut *(heap_base.add(start) as *mut VMDrcHeader) };
             debug_assert!(header.is_in_over_approximated_stack_roots());
@@ -722,16 +724,16 @@ impl DrcHeap {
 
             // This GC ref was not marked, so remove it from the
             // over-approximated-stack-roots list and decrement its ref count.
-            next = header.next_over_approximated_stack_root();
-            let prev_next = header.next_over_approximated_stack_root();
+            let next_oasr = header.next_over_approximated_stack_root();
+            next = next_oasr.as_ref().map(|r| r.unchecked_copy());
             header.set_in_over_approximated_stack_roots_bit(false);
             match &prev {
-                None => *self.over_approximated_stack_roots = prev_next,
+                None => *self.over_approximated_stack_roots = next_oasr,
                 Some(prev) => {
-                    let prev_start = prev.as_heap_index().unwrap().get() as usize;
+                    let prev_start = unsafe { prev.as_heap_index().unwrap_unchecked() }.get() as usize;
                     let prev_header =
                         unsafe { &mut *(heap_base.add(prev_start) as *mut VMDrcHeader) };
-                    prev_header.set_next_over_approximated_stack_root(prev_next);
+                    prev_header.set_next_over_approximated_stack_root(next_oasr);
                 }
             }
             self.dec_ref_and_maybe_dealloc(host_data_table, &gc_ref);
