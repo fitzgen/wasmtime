@@ -155,7 +155,7 @@ pub(crate) struct DrcHeap {
 
     /// Cached type index for which ensure_trace_info was last called.
     /// Avoids repeated lookups when allocating the same type repeatedly.
-    last_ensured_trace_info_ty: Option<VMSharedTypeIndex>,
+    last_ensured_trace_info_ty: u32,
 }
 
 impl DrcHeap {
@@ -171,7 +171,7 @@ impl DrcHeap {
             vmmemory: None,
             free_list: None,
             dec_ref_stack: Some(Vec::with_capacity(1)),
-            last_ensured_trace_info_ty: None,
+            last_ensured_trace_info_ty: u32::MAX,
         })
     }
 
@@ -438,7 +438,7 @@ impl DrcHeap {
     /// Ensure that we have tracing information for the given type.
     #[inline]
     fn ensure_trace_info(&mut self, ty: VMSharedTypeIndex) {
-        if self.last_ensured_trace_info_ty == Some(ty) {
+        if self.last_ensured_trace_info_ty == ty.bits() {
             return;
         }
         self.ensure_trace_info_slow(ty);
@@ -448,12 +448,12 @@ impl DrcHeap {
     fn ensure_trace_info_slow(&mut self, ty: VMSharedTypeIndex) {
         let idx = ty.bits() as usize;
         if idx < self.trace_infos.len() && self.trace_infos[idx].is_some() {
-            self.last_ensured_trace_info_ty = Some(ty);
+            self.last_ensured_trace_info_ty = ty.bits();
             return;
         }
 
         self.insert_new_trace_info(ty);
-        self.last_ensured_trace_info_ty = Some(ty);
+        self.last_ensured_trace_info_ty = ty.bits();
     }
 
     fn insert_new_trace_info(&mut self, ty: VMSharedTypeIndex) {
