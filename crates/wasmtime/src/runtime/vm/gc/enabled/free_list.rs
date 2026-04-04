@@ -184,6 +184,7 @@ impl FreeList {
     /// When splitting, the remainder stays at the same Vec position (since its
     /// index is still between the previous and next blocks), avoiding an O(n)
     /// remove + O(n) insert. Only exact-fit blocks require a Vec::remove.
+    #[inline(always)]
     fn first_fit_and_split(&mut self, alloc_size: u32) -> Option<u32> {
         debug_assert_eq!(alloc_size % ALIGN_U32, 0);
 
@@ -229,7 +230,7 @@ impl FreeList {
         self.alloc_impl(alloc_size)
     }
 
-    #[inline]
+    #[inline(always)]
     fn alloc_impl(&mut self, alloc_size: u32) -> Option<NonZeroU32> {
         debug_assert_eq!(alloc_size % ALIGN_U32, 0);
 
@@ -257,7 +258,7 @@ impl FreeList {
         self.dealloc_impl(index.get(), alloc_size);
     }
 
-    #[inline]
+    #[inline(always)]
     fn dealloc_impl(&mut self, index: u32, alloc_size: u32) {
         debug_assert_eq!(index % ALIGN_U32, 0);
         debug_assert_eq!(alloc_size % ALIGN_U32, 0);
