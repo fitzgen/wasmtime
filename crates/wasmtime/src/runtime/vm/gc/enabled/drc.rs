@@ -1061,12 +1061,19 @@ unsafe impl GcHeap for DrcHeap {
             );
         }
 
-        *self.index_mut(drc_ref(&gc_ref)) = VMDrcHeader {
-            header,
-            ref_count: 1,
-            next_over_approximated_stack_root: None,
-            object_size,
-        };
+        // Use direct pointer access to skip index_mut bounds checks.
+        // SAFETY: gc_ref was just allocated with at least VMDrcHeader size.
+        let start = gc_ref.as_heap_index().unwrap().get() as usize;
+        let vmmemory = self.vmmemory();
+        debug_assert!(start + core::mem::size_of::<VMDrcHeader>() <= vmmemory.current_length());
+        unsafe {
+            *(vmmemory.base.as_ptr().add(start) as *mut VMDrcHeader) = VMDrcHeader {
+                header,
+                ref_count: 1,
+                next_over_approximated_stack_root: None,
+                object_size,
+            };
+        }
         Ok(Ok(gc_ref))
     }
 
@@ -1107,7 +1114,15 @@ unsafe impl GcHeap for DrcHeap {
         let next = (*self.over_approximated_stack_roots)
             .as_ref()
             .map(|r| r.unchecked_copy());
-        let drc_header = self.index_mut(drc_ref(&gc_ref));
+
+        // Use direct pointer access to skip index_mut bounds checks.
+        // SAFETY: gc_ref was just allocated with at least VMDrcHeader size,
+        // and the heap memory is disjoint from self's struct fields.
+        let start = gc_ref.as_heap_index().unwrap().get() as usize;
+        let vmmemory = self.vmmemory();
+        debug_assert!(start + core::mem::size_of::<VMDrcHeader>() <= vmmemory.current_length());
+        let drc_header =
+            unsafe { &mut *(vmmemory.base.as_ptr().add(start) as *mut VMDrcHeader) };
         *drc_header = VMDrcHeader {
             header,
             ref_count: 1,
