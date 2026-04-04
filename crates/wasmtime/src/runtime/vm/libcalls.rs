@@ -732,8 +732,7 @@ fn gc_alloc_raw(
             debug_assert!(align_usize.is_power_of_two());
             let layout = unsafe { Layout::from_size_align_unchecked(size_usize, align_usize) };
             let gc_store = opaque.try_gc_store_mut().unwrap();
-            if let Ok(gc_ref) = gc_store.alloc_raw(header, layout)? {
-                let raw = gc_store.expose_gc_ref_to_wasm(gc_ref);
+            if let Ok(raw) = gc_store.alloc_raw_and_expose(header, layout)? {
                 return Ok(raw);
             }
         }

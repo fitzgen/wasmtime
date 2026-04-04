@@ -1017,6 +1017,58 @@ unsafe impl GcHeap for DrcHeap {
         Ok(Ok(gc_ref))
     }
 
+    fn alloc_raw_and_expose(
+        &mut self,
+        header: VMGcHeader,
+        layout: Layout,
+    ) -> Result<Result<core::num::NonZeroU32, u64>> {
+        debug_assert!(layout.size() >= core::mem::size_of::<VMDrcHeader>());
+        debug_assert!(layout.align() >= core::mem::align_of::<VMDrcHeader>());
+        debug_assert_eq!(header.reserved_u26(), 0);
+
+        if let Some(ty) = header.ty() {
+            self.ensure_trace_info(ty);
+        }
+
+        let object_size = u32::try_from(layout.size()).unwrap();
+        let alloc_size = FreeList::aligned_size(object_size);
+
+        let gc_ref = match self.free_list.as_mut().unwrap().alloc_fast(alloc_size) {
+            None => return Ok(Err(u64::try_from(layout.size()).unwrap())),
+            Some(index) => VMGcRef::from_heap_index(index).unwrap(),
+        };
+
+        if cfg!(gc_zeal) {
+            let start = usize::try_from(gc_ref.as_heap_index().unwrap().get()).unwrap();
+            let slice = &self.heap_slice()[start..][..layout.size()];
+            gc_assert!(
+                slice.iter().all(|&b| b == POISON),
+                "newly allocated GC object at index {start} is not fully poisoned; \
+                 freed memory was corrupted",
+            );
+        }
+
+        let raw = gc_ref.as_raw_non_zero_u32();
+
+        // Write header and expose in one go, avoiding separate vtable call.
+        let next = (*self.over_approximated_stack_roots)
+            .as_ref()
+            .map(|r| r.unchecked_copy());
+        let drc_header = self.index_mut(drc_ref(&gc_ref));
+        *drc_header = VMDrcHeader {
+            header,
+            ref_count: 1,
+            next_over_approximated_stack_root: None,
+            object_size,
+        };
+        // expose_gc_ref_to_wasm inline: push onto over-approximated stack roots.
+        drc_header.set_in_over_approximated_stack_roots_bit(true);
+        drc_header.set_next_over_approximated_stack_root(next);
+        *self.over_approximated_stack_roots = Some(gc_ref);
+
+        Ok(Ok(raw))
+    }
+
     fn alloc_uninit_struct_or_exn(
         &mut self,
         ty: VMSharedTypeIndex,

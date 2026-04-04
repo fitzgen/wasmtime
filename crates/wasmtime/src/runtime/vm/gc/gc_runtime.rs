@@ -266,6 +266,24 @@ pub unsafe trait GcHeap: 'static + Send + Sync {
     ///   alignment is larger than this collector's implementation limit.
     fn alloc_raw(&mut self, header: VMGcHeader, layout: Layout) -> Result<Result<VMGcRef, u64>>;
 
+    /// Combined alloc_raw + expose_gc_ref_to_wasm in a single call.
+    ///
+    /// Returns the raw NonZeroU32 representation on success, or the required
+    /// size on OOM, ready for the caller to retry after GC.
+    fn alloc_raw_and_expose(
+        &mut self,
+        header: VMGcHeader,
+        layout: Layout,
+    ) -> Result<Result<core::num::NonZeroU32, u64>> {
+        let gc_ref = match self.alloc_raw(header, layout)? {
+            Err(n) => return Ok(Err(n)),
+            Ok(gc_ref) => gc_ref,
+        };
+        let raw = gc_ref.as_raw_non_zero_u32();
+        self.expose_gc_ref_to_wasm(gc_ref);
+        Ok(Ok(raw))
+    }
+
     /// Allocate a GC-managed struct of the given type and layout.
     ///
     /// The struct's fields are left uninitialized. It is the caller's

@@ -284,6 +284,27 @@ impl GcStore {
         self.gc_heap.alloc_raw(header, layout)
     }
 
+    /// Combined alloc_raw + expose_gc_ref_to_wasm in a single vtable dispatch.
+    pub fn alloc_raw_and_expose(
+        &mut self,
+        header: VMGcHeader,
+        layout: Layout,
+    ) -> Result<Result<NonZeroU32, u64>> {
+        #[cfg(all(gc_zeal, feature = "std"))]
+        if let Some(counter) = self.gc_zeal_alloc_counter.take() {
+            match NonZeroU32::new(counter.get() - 1) {
+                Some(c) => self.gc_zeal_alloc_counter = Some(c),
+                None => {
+                    log::trace!("gc_zeal: allocation counter reached zero, forcing GC");
+                    self.gc_zeal_alloc_counter = self.gc_zeal_alloc_counter_init;
+                    return Ok(Err(0));
+                }
+            }
+        }
+
+        self.gc_heap.alloc_raw_and_expose(header, layout)
+    }
+
     /// Allocate an uninitialized struct with the given type index and layout.
     ///
     /// This does NOT check that the index is currently allocated in the types
