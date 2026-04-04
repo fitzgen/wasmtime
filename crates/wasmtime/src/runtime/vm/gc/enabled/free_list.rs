@@ -139,10 +139,6 @@ impl FreeList {
 
         // Okay! Add a block to our free list for the new capacity, potentially
         // merging it with existing blocks at the end of the free list.
-        log::trace!(
-            "FreeList::add_capacity(..): adding block {index:#x}..{:#x}",
-            index.get() + size
-        );
         self.dealloc(index, layout);
     }
 
@@ -221,7 +217,6 @@ impl FreeList {
     ///
     /// * `Err(_)`:
     pub fn alloc(&mut self, layout: Layout) -> Result<Option<NonZeroU32>> {
-        log::trace!("FreeList::alloc({layout:?})");
         let alloc_size = self.check_layout(layout)?;
         Ok(self.alloc_impl(alloc_size))
     }
@@ -245,13 +240,11 @@ impl FreeList {
         #[cfg(debug_assertions)]
         self.check_integrity();
 
-        log::trace!("FreeList::alloc -> {block_index:#x}");
         Some(unsafe { NonZeroU32::new_unchecked(block_index) })
     }
 
     /// Deallocate an object with the given layout.
     pub fn dealloc(&mut self, index: NonZeroU32, layout: Layout) {
-        log::trace!("FreeList::dealloc({index:#x}, {layout:?})");
         let alloc_size = self.check_layout(layout).unwrap();
         self.dealloc_impl(index.get(), alloc_size);
     }
@@ -296,12 +289,6 @@ impl FreeList {
                 if blocks_are_contiguous(prev_index, prev_len, index)
                     && blocks_are_contiguous(index, alloc_size, next_index) =>
             {
-                log::trace!(
-                    "merging blocks {prev_index:#x}..{prev_end:#x}, {index:#x}..{index_end:#x}, {next_index:#x}..{next_end:#x}",
-                    prev_end = prev_index + prev_len,
-                    index_end = index + alloc_size,
-                    next_end = next_index + next_len,
-                );
                 // Remove next block and extend prev block.
                 self.blocks.remove(pos);
                 let merged_block_len = next_index + next_len - prev_index;
@@ -313,11 +300,6 @@ impl FreeList {
             (Some((prev_index, prev_len)), _)
                 if blocks_are_contiguous(prev_index, prev_len, index) =>
             {
-                log::trace!(
-                    "merging blocks {prev_index:#x}..{prev_end:#x}, {index:#x}..{index_end:#x}",
-                    prev_end = prev_index + prev_len,
-                    index_end = index + alloc_size,
-                );
                 let merged_block_len = index + alloc_size - prev_index;
                 debug_assert_eq!(merged_block_len % ALIGN_U32, 0);
                 self.blocks[pos - 1].1 = merged_block_len;
@@ -327,11 +309,6 @@ impl FreeList {
             (_, Some((next_index, next_len)))
                 if blocks_are_contiguous(index, alloc_size, next_index) =>
             {
-                log::trace!(
-                    "merging blocks {index:#x}..{index_end:#x}, {next_index:#x}..{next_end:#x}",
-                    index_end = index + alloc_size,
-                    next_end = next_index + next_len,
-                );
                 let merged_block_len = next_index + next_len - index;
                 debug_assert_eq!(merged_block_len % ALIGN_U32, 0);
                 self.blocks[pos] = (index, merged_block_len);
@@ -340,7 +317,6 @@ impl FreeList {
             // None of the blocks are contiguous: insert this block into the
             // free list.
             (_, _) => {
-                log::trace!("cannot merge blocks");
                 self.blocks.insert(pos, (index, alloc_size));
             }
         }

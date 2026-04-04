@@ -203,7 +203,6 @@ impl DrcHeap {
             *gc_ref
         );
         header.ref_count += 1;
-        log::trace!("increment {:#p} ref count -> {}", *gc_ref, header.ref_count);
     }
 
     /// Decrement the ref count for the associated object.
@@ -223,7 +222,6 @@ impl DrcHeap {
             *gc_ref
         );
         header.ref_count -= 1;
-        log::trace!("decrement {:#p} ref count -> {}", *gc_ref, header.ref_count);
         header.ref_count == 0
     }
 
@@ -257,11 +255,6 @@ impl DrcHeap {
                 gc_ref
             );
             drc_header.ref_count -= 1;
-            log::trace!(
-                "decrement {:#p} ref count -> {}",
-                gc_ref,
-                drc_header.ref_count
-            );
             if drc_header.ref_count != 0 {
                 continue;
             }
@@ -327,12 +320,14 @@ impl DrcHeap {
                 }
             } else {
                 debug_assert!(drc_header.header.kind().matches(VMGcKind::ExternRef));
-            }
 
-            // Handle externref host data.
-            if let Some(externref) = gc_ref.as_typed::<VMDrcExternRef>(self) {
-                let host_data_id = self.index(externref).host_data;
-                host_data_table.dealloc(host_data_id);
+                // Handle externref host data. Only externrefs have host data,
+                // and ty is None only for externrefs, so we skip this for
+                // struct/array objects entirely.
+                if let Some(externref) = gc_ref.as_typed::<VMDrcExternRef>(self) {
+                    let host_data_id = self.index(externref).host_data;
+                    host_data_table.dealloc(host_data_id);
+                }
             }
 
             // Deallocate using the object_size we already read.
@@ -568,8 +563,6 @@ impl DrcHeap {
                 continue;
             }
 
-            log::trace!("Found GC reference on the stack: {gc_ref:#p}");
-
             debug_assert!(
                 over_approx_set.contains(&gc_ref),
                 "every on-stack gc ref inside a Wasm frame should \
@@ -614,13 +607,6 @@ impl DrcHeap {
     /// Sweep the bump allocation table after we've discovered our precise stack
     /// roots.
     fn sweep(&mut self, host_data_table: &mut ExternRefHostDataTable) {
-        if log::log_enabled!(log::Level::Trace) {
-            Self::log_gc_ref_set(
-                "over-approximated-stack-roots set before sweeping",
-                self.iter_over_approximated_stack_roots(),
-            );
-        }
-
         // Logically, we are taking the difference between
         // over-approximated-stack-roots set and the precise-stack-roots set,
         // decrementing the ref count for each object in that difference
@@ -662,31 +648,17 @@ impl DrcHeap {
             .map(|r| r.unchecked_copy());
 
         while let Some(gc_ref) = next {
-            log::trace!("sweeping gc ref: {gc_ref:#p}");
-
             let header = self.index_mut(drc_ref(&gc_ref));
             debug_assert!(header.is_in_over_approximated_stack_roots());
 
             if header.clear_marked() {
-                // This GC ref was marked, meaning it is still on the stack, so
-                // keep it in the over-approximated-stack-roots list and move on
-                // to the next object in the list.
-                log::trace!(
-                    "  -> {gc_ref:#p} is marked, leaving it in the over-approximated-\
-                     stack-roots list"
-                );
                 next = header.next_over_approximated_stack_root();
                 prev = Some(gc_ref);
                 continue;
             }
 
-            // This GC ref was not marked, meaning it is no longer on the stack,
-            // so remove it from the over-approximated-stack-roots list and
-            // decrement its reference count.
-            log::trace!(
-                "  -> {gc_ref:#p} is not marked, removing it from over-approximated-\
-                 stack-roots list and decrementing its ref count"
-            );
+            // This GC ref was not marked, so remove it from the
+            // over-approximated-stack-roots list and decrement its ref count.
             next = header.next_over_approximated_stack_root();
             let prev_next = header.next_over_approximated_stack_root();
             header.set_in_over_approximated_stack_roots_bit(false);
@@ -700,13 +672,6 @@ impl DrcHeap {
         }
 
         log::trace!("Done sweeping");
-
-        if log::log_enabled!(log::Level::Trace) {
-            Self::log_gc_ref_set(
-                "over-approximated-stack-roots set after sweeping",
-                self.iter_over_approximated_stack_roots(),
-            );
-        }
     }
 }
 
@@ -1049,7 +1014,6 @@ unsafe impl GcHeap for DrcHeap {
             next_over_approximated_stack_root: None,
             object_size,
         };
-        log::trace!("new object: increment {gc_ref:#p} ref count -> 1");
         Ok(Ok(gc_ref))
     }
 
@@ -1182,8 +1146,6 @@ impl<'a> GarbageCollection<'a> for DrcCollection<'a> {
     fn collect_increment(&mut self) -> GcProgress {
         match self.phase {
             DrcCollectionPhase::Trace => {
-                log::trace!("Begin DRC trace");
-
                 self.heap.assert_over_approximated_stack_roots_integrity();
                 self.heap.assert_free_blocks_are_poisoned();
 
@@ -1192,13 +1154,10 @@ impl<'a> GarbageCollection<'a> for DrcCollection<'a> {
                 self.heap.assert_over_approximated_stack_roots_integrity();
                 self.heap.assert_free_blocks_are_poisoned();
 
-                log::trace!("End DRC trace");
                 self.phase = DrcCollectionPhase::Sweep;
                 GcProgress::Continue
             }
             DrcCollectionPhase::Sweep => {
-                log::trace!("Begin DRC sweep");
-
                 self.heap.assert_over_approximated_stack_roots_integrity();
                 self.heap.assert_free_blocks_are_poisoned();
 
@@ -1207,7 +1166,6 @@ impl<'a> GarbageCollection<'a> for DrcCollection<'a> {
                 self.heap.assert_over_approximated_stack_roots_integrity();
                 self.heap.assert_free_blocks_are_poisoned();
 
-                log::trace!("End DRC sweep");
                 self.phase = DrcCollectionPhase::Done;
                 GcProgress::Complete
             }

@@ -211,7 +211,6 @@ impl GcStore {
     pub fn expose_gc_ref_to_wasm(&mut self, gc_ref: VMGcRef) -> NonZeroU32 {
         let raw = gc_ref.as_raw_non_zero_u32();
         if !gc_ref.is_i31() {
-            log::trace!("exposing GC ref to Wasm: {gc_ref:p}");
             self.gc_heap.expose_gc_ref_to_wasm(gc_ref);
         }
         raw
