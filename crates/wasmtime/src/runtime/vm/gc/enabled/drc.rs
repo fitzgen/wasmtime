@@ -183,7 +183,8 @@ impl DrcHeap {
         let drc_ref = drc_ref(&gc_ref);
         let size = self.index(drc_ref).object_size;
         let alloc_size = FreeList::aligned_size(size);
-        let index = gc_ref.as_heap_index().unwrap();
+        // SAFETY: gc_ref is a non-i31 heap ref, always has a valid index.
+        let index = unsafe { gc_ref.as_heap_index().unwrap_unchecked() };
 
         // Poison the freed memory so that any stale access is detectable.
         if cfg!(gc_zeal) {
@@ -191,7 +192,8 @@ impl DrcHeap {
             self.heap_slice_mut()[idx..][..usize::try_from(alloc_size).unwrap()].fill(POISON);
         }
 
-        self.free_list.as_mut().unwrap().dealloc_fast(index, alloc_size);
+        // SAFETY: free_list is always Some after heap initialization.
+        unsafe { self.free_list.as_mut().unwrap_unchecked() }.dealloc_fast(index, alloc_size);
     }
 
     /// Increment the ref count for the associated object.
@@ -243,7 +245,8 @@ impl DrcHeap {
         host_data_table: &mut ExternRefHostDataTable,
         gc_ref: &VMGcRef,
     ) {
-        let mut stack = self.dec_ref_stack.take().unwrap();
+        // SAFETY: dec_ref_stack is always Some except during dec_ref processing.
+        let mut stack = unsafe { self.dec_ref_stack.take().unwrap_unchecked() };
         debug_assert!(stack.is_empty());
         stack.push(gc_ref.unchecked_copy());
 
@@ -265,7 +268,7 @@ impl DrcHeap {
 
                 // SAFETY: current is a non-i31 gc_ref that was allocated by us,
                 // so it always has a valid heap index.
-                let start = current.as_heap_index().unwrap().get() as usize;
+                let start = unsafe { current.as_heap_index().unwrap_unchecked() }.get() as usize;
 
                 // Read the DRC header directly via the cached heap base pointer,
                 // skipping the two bounds checks in index_mut.
@@ -368,7 +371,7 @@ impl DrcHeap {
 
                 // Deallocate using the object_size we already read.
                 let alloc_size = FreeList::aligned_size(object_size);
-                let index = current.as_heap_index().unwrap();
+                let index = unsafe { current.as_heap_index().unwrap_unchecked() };
 
                 if cfg!(gc_zeal) {
                     let idx = usize::try_from(index.get()).unwrap();
@@ -376,9 +379,8 @@ impl DrcHeap {
                         .fill(POISON);
                 }
 
-                self.free_list
-                    .as_mut()
-                    .unwrap()
+                // SAFETY: free_list is always Some after heap initialization.
+                unsafe { self.free_list.as_mut().unwrap_unchecked() }
                     .dealloc_fast(index, alloc_size);
 
                 // Process the last child inline instead of via stack.
@@ -1053,7 +1055,8 @@ unsafe impl GcHeap for DrcHeap {
         let object_size = u32::try_from(layout.size()).unwrap();
         let alloc_size = FreeList::aligned_size(object_size);
 
-        let gc_ref = match self.free_list.as_mut().unwrap().alloc_fast(alloc_size) {
+        // SAFETY: free_list is always Some after heap initialization.
+        let gc_ref = match unsafe { self.free_list.as_mut().unwrap_unchecked() }.alloc_fast(alloc_size) {
             None => return Ok(Err(u64::try_from(layout.size()).unwrap())),
             Some(index) => VMGcRef::from_heap_index(index).unwrap(),
         };
@@ -1103,7 +1106,7 @@ unsafe impl GcHeap for DrcHeap {
         let object_size = u32::try_from(layout.size()).unwrap();
         let alloc_size = FreeList::aligned_size(object_size);
 
-        let gc_ref = match self.free_list.as_mut().unwrap().alloc_fast(alloc_size) {
+        let gc_ref = match unsafe { self.free_list.as_mut().unwrap_unchecked() }.alloc_fast(alloc_size) {
             None => return Ok(Err(u64::try_from(layout.size()).unwrap())),
             Some(index) => VMGcRef::from_heap_index(index).unwrap(),
         };
