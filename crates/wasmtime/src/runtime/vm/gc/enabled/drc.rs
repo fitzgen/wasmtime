@@ -267,7 +267,9 @@ impl DrcHeap {
             return;
         }
 
-        // Ref count reached zero. Full cascade processing needed.
+        // Ref count reached zero. Set it back to 1 so the cascade loop can
+        // uniformly decrement all items without a special first-iteration flag.
+        drc_header.ref_count = 1;
         self.dec_ref_cascade(host_data_table, gc_ref, heap_base, _heap_len);
     }
 
@@ -282,12 +284,10 @@ impl DrcHeap {
         let mut stack = unsafe { self.dec_ref_stack.take().unwrap_unchecked() };
         debug_assert!(stack.is_empty());
 
-        // Process gc_ref directly (we already decremented and know rc == 0).
-        // Enter the tail-call processing loop with gc_ref as the first item.
+        // Process gc_ref directly. Enter the tail-call processing loop
+        // with gc_ref as the first item. Its ref_count was set back to 1 by the
+        // caller so we can uniformly decrement here.
         let mut current = gc_ref.unchecked_copy();
-        // The first current already had its ref_count decremented to 0 above.
-        // For subsequent items from the stack, we need to decrement.
-        let mut already_decremented = true;
         'outer: loop {
             // Tail-call loop: process the last child of a struct inline
             // instead of pushing it to the stack, saving one push+pop per node.
@@ -310,18 +310,15 @@ impl DrcHeap {
                 let drc_header =
                     unsafe { &mut *(heap_base.add(start) as *mut VMDrcHeader) };
 
-                if !already_decremented {
-                    debug_assert_ne!(
-                        drc_header.ref_count, 0,
-                        "{:#p} is supposedly live; should have nonzero ref count",
-                        current
-                    );
-                    drc_header.ref_count -= 1;
-                    if drc_header.ref_count != 0 {
-                        break;
-                    }
+                debug_assert_ne!(
+                    drc_header.ref_count, 0,
+                    "{:#p} is supposedly live; should have nonzero ref count",
+                    current
+                );
+                drc_header.ref_count -= 1;
+                if drc_header.ref_count != 0 {
+                    break;
                 }
-                already_decremented = false;
 
                 // Ref count reached zero. Extract type and size from the header
                 // we already read (avoiding re-reading from heap).
