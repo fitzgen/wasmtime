@@ -699,6 +699,46 @@ fn gc_alloc_raw(
     use core::alloc::Layout;
     use wasmtime_environ::{ModuleInternedTypeIndex, VMGcKind};
 
+    // Fast path: resolve types and allocate through StoreOpaque directly,
+    // avoiding vtable dispatch on `dyn VMStore` and async/fiber machinery.
+    // Disabled under gc_zeal because the alloc counter may force a GC which
+    // requires the async retry path.
+    #[cfg(not(gc_zeal))]
+    {
+        let opaque = store.store_opaque_mut();
+        if opaque.try_gc_store_mut().is_some() {
+            // Pack kind_and_reserved + module_interned_type_index into a u64 cache key.
+            let cache_key =
+                (kind_and_reserved as u64) << 32 | module_interned_type_index as u64;
+            let gc_store = opaque.try_gc_store_mut().unwrap();
+            let header = if gc_store.alloc_header_cache.0 == cache_key {
+                gc_store.alloc_header_cache.1
+            } else {
+                let shared_type_index = opaque
+                    .instance(instance)
+                    .engine_type_index(ModuleInternedTypeIndex::from_u32(
+                        module_interned_type_index,
+                    ));
+                // SAFETY: kind_and_reserved comes from Cranelift-compiled code
+                // which ensures the upper 6 bits are a valid VMGcKind.
+                let header =
+                    unsafe { VMGcHeader::from_raw_u32_and_index(kind_and_reserved, shared_type_index) };
+                let gc_store = opaque.try_gc_store_mut().unwrap();
+                gc_store.alloc_header_cache = (cache_key, header);
+                header
+            };
+            let size_usize = size as usize;
+            let align_usize = align as usize;
+            debug_assert!(align_usize.is_power_of_two());
+            let layout = unsafe { Layout::from_size_align_unchecked(size_usize, align_usize) };
+            let gc_store = opaque.try_gc_store_mut().unwrap();
+            if let Ok(gc_ref) = gc_store.alloc_raw(header, layout)? {
+                let raw = gc_store.expose_gc_ref_to_wasm(gc_ref);
+                return Ok(raw);
+            }
+        }
+    }
+
     let kind = VMGcKind::from_high_bits_of_u32(kind_and_reserved);
     log::trace!("gc_alloc_raw(kind={kind:?}, size={size}, align={align})");
 
@@ -724,21 +764,6 @@ fn gc_alloc_raw(
         err.context(e)
     })?;
 
-    // Fast path: when the GC store already exists and allocation succeeds,
-    // skip the async/fiber machinery (BlockingContext, retry_after_gc, etc.).
-    // Disabled under gc_zeal because the alloc counter may force a GC which
-    // requires the async retry path.
-    #[cfg(not(gc_zeal))]
-    {
-        let opaque = store.store_opaque_mut();
-        if let Some(gc_store) = opaque.try_gc_store_mut() {
-            if let Ok(gc_ref) = gc_store.alloc_raw(header, layout)? {
-                let raw = gc_store.expose_gc_ref_to_wasm(gc_ref);
-                return Ok(raw);
-            }
-        }
-    }
-
     let (mut limiter, store) = store.resource_limiter_and_store_opaque();
     block_on!(store, async |store, asyncness| {
         let gc_ref = store
@@ -754,6 +779,7 @@ fn gc_alloc_raw(
         Ok(raw)
     })?
 }
+
 
 // Intern a `funcref` into the GC heap, returning its `FuncRefTableId`.
 //

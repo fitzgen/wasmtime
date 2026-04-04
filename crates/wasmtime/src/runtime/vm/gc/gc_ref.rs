@@ -67,6 +67,21 @@ impl VMGcHeader {
         Self { kind, ty }
     }
 
+    /// Create the header directly from a raw `kind_and_reserved` u32 and type.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure the upper 6 bits of `kind_and_reserved` encode a
+    /// valid `VMGcKind`.
+    #[inline]
+    pub unsafe fn from_raw_u32_and_index(kind_and_reserved: u32, ty: VMSharedTypeIndex) -> Self {
+        debug_assert!(VMGcKind::try_from_u32(kind_and_reserved & VMGcKind::MASK).is_some());
+        Self {
+            kind: kind_and_reserved,
+            ty,
+        }
+    }
+
     /// Get the kind of GC object that this is.
     pub fn kind(&self) -> VMGcKind {
         VMGcKind::from_high_bits_of_u32(self.kind)

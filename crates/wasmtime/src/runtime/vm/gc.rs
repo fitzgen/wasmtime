@@ -49,6 +49,11 @@ pub struct GcStore {
     /// The function-references table for this GC heap.
     pub func_ref_table: FuncRefTable,
 
+    /// Cached header from the last gc_alloc_raw call to skip repeated type
+    /// resolution when allocating the same type repeatedly.
+    #[cfg(not(gc_zeal))]
+    pub alloc_header_cache: (u64, VMGcHeader),
+
     /// An allocation counter that triggers GC when it reaches zero.
     ///
     /// Initialized from the `WASMTIME_GC_ZEAL_ALLOC_COUNTER` environment
@@ -86,6 +91,8 @@ impl GcStore {
             gc_heap,
             host_data_table,
             func_ref_table,
+            #[cfg(not(gc_zeal))]
+            alloc_header_cache: (u64::MAX, VMGcHeader::externref()),
             #[cfg(all(gc_zeal, feature = "std"))]
             gc_zeal_alloc_counter: gc_zeal_alloc_counter_init,
             #[cfg(all(gc_zeal, feature = "std"))]
