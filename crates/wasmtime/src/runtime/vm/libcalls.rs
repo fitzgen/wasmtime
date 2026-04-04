@@ -694,13 +694,15 @@ fn gc_alloc_raw(
     module_interned_type_index: u32,
     size: u32,
     align: u32,
-) -> Result<core::num::NonZeroU32> {
+) -> u32 {
     use crate::vm::VMGcHeader;
     use core::alloc::Layout;
-    use wasmtime_environ::{ModuleInternedTypeIndex, VMGcKind};
+    use wasmtime_environ::ModuleInternedTypeIndex;
 
     // Fast path: resolve types and allocate through StoreOpaque directly,
     // avoiding vtable dispatch on `dyn VMStore` and async/fiber machinery.
+    // Returning u32 instead of Result<NonZeroU32> avoids the catch_unwind
+    // wrapper in HostResult, eliminating the 952-byte stack frame overhead.
     // Disabled under gc_zeal because the alloc counter may force a GC which
     // requires the async retry path.
     #[cfg(not(gc_zeal))]
@@ -716,8 +718,10 @@ fn gc_alloc_raw(
                 debug_assert!((align as usize).is_power_of_two());
                 let layout =
                     unsafe { Layout::from_size_align_unchecked(size as usize, align as usize) };
-                if let Ok(raw) = gc_store.alloc_raw_and_expose(header, layout)? {
-                    return Ok(raw);
+                match gc_store.alloc_raw_and_expose(header, layout) {
+                    Ok(Ok(raw)) => return raw.get(),
+                    Ok(Err(_)) => {} // needs more space, fall through
+                    Err(_) => {} // error, fall through to slow path with catch_unwind
                 }
             }
         }
@@ -738,51 +742,155 @@ fn gc_alloc_raw(
             debug_assert!((align as usize).is_power_of_two());
             let layout =
                 unsafe { Layout::from_size_align_unchecked(size as usize, align as usize) };
-            if let Ok(raw) = gc_store.alloc_raw_and_expose(header, layout)? {
-                return Ok(raw);
+            match gc_store.alloc_raw_and_expose(header, layout) {
+                Ok(Ok(raw)) => return raw.get(),
+                Ok(Err(_)) => {} // needs more space, fall through
+                Err(_) => {} // error, fall through to slow path with catch_unwind
             }
         }
     }
 
-    let kind = VMGcKind::from_high_bits_of_u32(kind_and_reserved);
-    log::trace!("gc_alloc_raw(kind={kind:?}, size={size}, align={align})");
+    // Slow path: wrap in catch_unwind to safely handle panics and errors
+    // since we're returning through extern "C" without the HostResult
+    // catch_unwind wrapper.
+    gc_alloc_raw_slow(
+        store,
+        instance,
+        kind_and_reserved,
+        module_interned_type_index,
+        size,
+        align,
+    )
+}
 
-    let module = store
-        .instance(instance)
-        .runtime_module()
-        .expect("should never allocate GC types defined in a dummy module");
+#[cfg(feature = "gc-drc")]
+#[inline(never)]
+#[cold]
+fn gc_alloc_raw_slow(
+    store: &mut dyn VMStore,
+    instance: InstanceId,
+    kind_and_reserved: u32,
+    module_interned_type_index: u32,
+    size: u32,
+    align: u32,
+) -> u32 {
+    use crate::vm::traphandlers::{tls, UnwindReason};
+    use crate::vm::VMGcHeader;
+    use core::alloc::Layout;
+    use wasmtime_environ::{ModuleInternedTypeIndex, VMGcKind};
 
-    let module_interned_type_index = ModuleInternedTypeIndex::from_u32(module_interned_type_index);
-    let shared_type_index = module
-        .signatures()
-        .shared_type(module_interned_type_index)
-        .expect("should have engine type index for module type index");
+    fn slow_impl(
+        store: &mut dyn VMStore,
+        instance: InstanceId,
+        kind_and_reserved: u32,
+        module_interned_type_index: u32,
+        size: u32,
+        align: u32,
+    ) -> Result<core::num::NonZeroU32> {
+        use crate::vm::VMGcHeader;
+        use core::alloc::Layout;
+        use wasmtime_environ::{ModuleInternedTypeIndex, VMGcKind};
 
-    let mut header = VMGcHeader::from_kind_and_index(kind, shared_type_index);
-    header.set_reserved_u26(kind_and_reserved & VMGcKind::UNUSED_MASK);
+        let kind = VMGcKind::from_high_bits_of_u32(kind_and_reserved);
+        log::trace!("gc_alloc_raw(kind={kind:?}, size={size}, align={align})");
 
-    let size = usize::try_from(size).unwrap();
-    let align = usize::try_from(align).unwrap();
-    assert!(align.is_power_of_two());
-    let layout = Layout::from_size_align(size, align).map_err(|e| {
-        let err = Error::from(crate::Trap::AllocationTooLarge);
-        err.context(e)
-    })?;
+        let module = store
+            .instance(instance)
+            .runtime_module()
+            .expect("should never allocate GC types defined in a dummy module");
 
-    let (mut limiter, store) = store.resource_limiter_and_store_opaque();
-    block_on!(store, async |store, asyncness| {
-        let gc_ref = store
-            .retry_after_gc_async(limiter.as_mut(), (), asyncness, |store, ()| {
-                store
-                    .unwrap_gc_store_mut()
-                    .alloc_raw(header, layout)?
-                    .map_err(|bytes_needed| crate::GcHeapOutOfMemory::new((), bytes_needed).into())
-            })
-            .await?;
+        let module_interned_type_index =
+            ModuleInternedTypeIndex::from_u32(module_interned_type_index);
+        let shared_type_index = module
+            .signatures()
+            .shared_type(module_interned_type_index)
+            .expect("should have engine type index for module type index");
 
-        let raw = store.unwrap_gc_store_mut().expose_gc_ref_to_wasm(gc_ref);
-        Ok(raw)
-    })?
+        let mut header = VMGcHeader::from_kind_and_index(kind, shared_type_index);
+        header.set_reserved_u26(kind_and_reserved & VMGcKind::UNUSED_MASK);
+
+        let size = usize::try_from(size).unwrap();
+        let align = usize::try_from(align).unwrap();
+        assert!(align.is_power_of_two());
+        let layout = Layout::from_size_align(size, align).map_err(|e| {
+            let err = Error::from(crate::Trap::AllocationTooLarge);
+            err.context(e)
+        })?;
+
+        let (mut limiter, store) = store.resource_limiter_and_store_opaque();
+        block_on!(store, async |store, asyncness| {
+            let gc_ref = store
+                .retry_after_gc_async(limiter.as_mut(), (), asyncness, |store, ()| {
+                    store
+                        .unwrap_gc_store_mut()
+                        .alloc_raw(header, layout)?
+                        .map_err(|bytes_needed| {
+                            crate::GcHeapOutOfMemory::new((), bytes_needed).into()
+                        })
+                })
+                .await?;
+
+            let raw = store.unwrap_gc_store_mut().expose_gc_ref_to_wasm(gc_ref);
+            Ok(raw)
+        })?
+    }
+
+    // Use a raw pointer to pass store through catch_unwind without moving
+    // the mutable reference. SAFETY: the pointer is only used within the
+    // catch_unwind closure and the error handling below, both of which
+    // execute before this function returns.
+    let store_ptr: *mut dyn VMStore = store;
+
+    #[cfg(all(feature = "std", panic = "unwind"))]
+    {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            slow_impl(
+                unsafe { &mut *store_ptr },
+                instance,
+                kind_and_reserved,
+                module_interned_type_index,
+                size,
+                align,
+            )
+        }));
+        match result {
+            Ok(Ok(raw)) => raw.get(),
+            Ok(Err(e)) => {
+                let reason = UnwindReason::Trap(e.into());
+                tls::with(|info| {
+                    info.unwrap()
+                        .record_unwind(unsafe { &mut *store_ptr }, reason)
+                });
+                0
+            }
+            Err(panic) => {
+                let reason = UnwindReason::Panic(panic);
+                tls::with(|info| {
+                    info.unwrap()
+                        .record_unwind(unsafe { &mut *store_ptr }, reason)
+                });
+                0
+            }
+        }
+    }
+    #[cfg(not(all(feature = "std", panic = "unwind")))]
+    {
+        match slow_impl(
+            store,
+            instance,
+            kind_and_reserved,
+            module_interned_type_index,
+            size,
+            align,
+        ) {
+            Ok(raw) => raw.get(),
+            Err(e) => {
+                let reason = UnwindReason::Trap(e.into());
+                tls::with(|info| info.unwrap().record_unwind(store, reason));
+                0
+            }
+        }
+    }
 }
 
 

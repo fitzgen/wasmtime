@@ -746,7 +746,7 @@ impl CallThreadState {
     ///
     /// Panics if unwind information has already been recorded as that should
     /// have been processed first.
-    fn record_unwind(&self, store: &mut dyn VMStore, reason: UnwindReason) {
+    pub(crate) fn record_unwind(&self, store: &mut dyn VMStore, reason: UnwindReason) {
         if cfg!(debug_assertions) {
             let prev = self.unwind.replace(UnwindState::None);
             assert!(prev.is_none());
