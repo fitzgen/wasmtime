@@ -690,7 +690,6 @@ impl DrcHeap {
         // of our `&mut` borrow on this heap (which ultimately comes from a
         // `&mut Store`) we're guaranteed that nothing will reentrantly touch
         // this heap or run Wasm code in this store.
-        log::trace!("Begin sweeping");
 
         // The `VMGcRef` of the previous object in the
         // over-approximated-stack-roots list, if any.
@@ -703,7 +702,14 @@ impl DrcHeap {
             .map(|r| r.unchecked_copy());
 
         while let Some(gc_ref) = next {
-            let header = self.index_mut(drc_ref(&gc_ref));
+            // Use direct pointer access to skip index_mut bounds checks.
+            // SAFETY: gc_ref points to a valid VMDrcHeader within the heap,
+            // and the heap memory is disjoint from self's struct fields.
+            let start = gc_ref.as_heap_index().unwrap().get() as usize;
+            let heap_base = self.vmmemory().base.as_ptr();
+            debug_assert!(start + core::mem::size_of::<VMDrcHeader>() <= self.vmmemory().current_length());
+            let header =
+                unsafe { &mut *(heap_base.add(start) as *mut VMDrcHeader) };
             debug_assert!(header.is_in_over_approximated_stack_roots());
 
             if header.clear_marked() {
@@ -719,14 +725,15 @@ impl DrcHeap {
             header.set_in_over_approximated_stack_roots_bit(false);
             match &prev {
                 None => *self.over_approximated_stack_roots = prev_next,
-                Some(prev) => self
-                    .index_mut(drc_ref(prev))
-                    .set_next_over_approximated_stack_root(prev_next),
+                Some(prev) => {
+                    let prev_start = prev.as_heap_index().unwrap().get() as usize;
+                    let prev_header =
+                        unsafe { &mut *(heap_base.add(prev_start) as *mut VMDrcHeader) };
+                    prev_header.set_next_over_approximated_stack_root(prev_next);
+                }
             }
             self.dec_ref_and_maybe_dealloc(host_data_table, &gc_ref);
         }
-
-        log::trace!("Done sweeping");
     }
 }
 
