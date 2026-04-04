@@ -240,6 +240,7 @@ impl DrcHeap {
     /// This uses an explicit stack, rather than recursion, for the scenario
     /// where dropping one object means that the ref count for another object
     /// that it referenced reaches zero.
+    #[inline(always)]
     fn dec_ref_and_maybe_dealloc(
         &mut self,
         host_data_table: &mut ExternRefHostDataTable,
@@ -266,7 +267,17 @@ impl DrcHeap {
             return;
         }
 
-        // Ref count reached zero. Now we need the stack for cascading.
+        // Ref count reached zero. Full cascade processing needed.
+        self.dec_ref_cascade(host_data_table, gc_ref, heap_base, _heap_len);
+    }
+
+    fn dec_ref_cascade(
+        &mut self,
+        host_data_table: &mut ExternRefHostDataTable,
+        gc_ref: &VMGcRef,
+        heap_base: *mut u8,
+        _heap_len: usize,
+    ) {
         // SAFETY: dec_ref_stack is always Some except during dec_ref processing.
         let mut stack = unsafe { self.dec_ref_stack.take().unwrap_unchecked() };
         debug_assert!(stack.is_empty());
