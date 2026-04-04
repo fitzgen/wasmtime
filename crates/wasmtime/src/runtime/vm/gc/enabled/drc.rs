@@ -374,6 +374,12 @@ impl DrcHeap {
                         TraceInfo::Struct { gc_ref_offsets } => {
                             // Read gc_ref fields using the cached heap base
                             // pointer and unchecked pointer access.
+                            // Use first-child-tail: the first valid child
+                            // becomes the tail (processed inline), all others
+                            // are pushed to the stack. This makes the
+                            // deallocation order match the allocation order
+                            // (left-first DFS), enabling adjacent free
+                            // coalescing.
                             for offset in gc_ref_offsets {
                                 let off = *offset as usize;
                                 // SAFETY: offset is within the allocated object
@@ -391,10 +397,10 @@ impl DrcHeap {
                                         let kind = header.kind().as_u32();
                                         VMGcKind::try_from_u32(kind).is_some()
                                     });
-                                    // Keep replacing tail_child; previous one
-                                    // goes to the stack.
-                                    if let Some(prev) = tail_child.replace(child) {
-                                        stack_push!(prev);
+                                    if tail_child.is_some() {
+                                        stack_push!(child);
+                                    } else {
+                                        tail_child = Some(child);
                                     }
                                 }
                             }
@@ -415,8 +421,10 @@ impl DrcHeap {
                                             let kind = header.kind().as_u32();
                                             VMGcKind::try_from_u32(kind).is_some()
                                         });
-                                        if let Some(prev) = tail_child.replace(child) {
-                                            stack_push!(prev);
+                                        if tail_child.is_some() {
+                                            stack_push!(child);
+                                        } else {
+                                            tail_child = Some(child);
                                         }
                                     }
                                 }
