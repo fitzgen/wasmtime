@@ -72,7 +72,8 @@ use crate::ir::instructions::{CallInfo, InstructionFormat, ResolvedConstraint};
 use crate::ir::{self, ArgumentExtension, BlockArg, ExceptionTable};
 use crate::ir::{
     ArgumentPurpose, Block, Constant, DynamicStackSlot, FuncRef, Function, GlobalValue, Inst,
-    JumpTable, MemFlags, Opcode, SigRef, StackSlot, Type, Value, ValueDef, ValueList, types,
+    JumpTable, MemFlags, MemFlagsData, Opcode, SigRef, StackSlot, Type, Value, ValueDef, ValueList,
+    types,
 };
 use crate::ir::{ExceptionTableItem, Signature};
 use crate::isa::{CallConv, TargetIsa};
@@ -1097,6 +1098,7 @@ impl<'a> Verifier<'a> {
     ) -> VerifierStepResult {
         let typ = self.func.dfg.ctrl_typevar(inst);
         let value_type = self.func.dfg.value_type(arg);
+        let flags_data = self.func.dfg.mem_flags[flags];
 
         if typ.bits() != value_type.bits() {
             errors.fatal((
@@ -1108,15 +1110,15 @@ impl<'a> Verifier<'a> {
                     typ.bits()
                 ),
             ))
-        } else if flags != MemFlags::new()
-            && flags != MemFlags::new().with_endianness(ir::Endianness::Little)
-            && flags != MemFlags::new().with_endianness(ir::Endianness::Big)
+        } else if flags_data != MemFlagsData::new()
+            && flags_data != MemFlagsData::new().with_endianness(ir::Endianness::Little)
+            && flags_data != MemFlagsData::new().with_endianness(ir::Endianness::Big)
         {
             errors.fatal((
                 inst,
                 "The bitcast instruction only accepts the `big` or `little` memory flags",
             ))
-        } else if flags == MemFlags::new() && typ.lane_count() != value_type.lane_count() {
+        } else if flags_data == MemFlagsData::new() && typ.lane_count() != value_type.lane_count() {
             errors.fatal((
                 inst,
                 "Byte order specifier required for bitcast instruction changing lane count",
@@ -1822,7 +1824,7 @@ impl<'a> Verifier<'a> {
 
         match *inst_data {
             ir::InstructionData::Store { flags, .. } => {
-                if flags.readonly() {
+                if self.func.dfg.mem_flags[flags].readonly() {
                     errors.fatal((
                         inst,
                         self.context(inst),

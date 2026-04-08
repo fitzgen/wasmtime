@@ -93,7 +93,7 @@ impl LastStores {
             self.other = inst.into();
         } else if opcode.can_store() {
             if let Some(memflags) = func.dfg.insts[inst].memflags() {
-                match memflags.alias_region() {
+                match func.dfg.mem_flags[memflags].alias_region() {
                     None => self.other = inst.into(),
                     Some(AliasRegion::Heap) => self.heap = inst.into(),
                     Some(AliasRegion::Table) => self.table = inst.into(),
@@ -110,7 +110,7 @@ impl LastStores {
 
     fn get_last_store(&self, func: &Function, inst: Inst) -> PackedOption<Inst> {
         if let Some(memflags) = func.dfg.insts[inst].memflags() {
-            match memflags.alias_region() {
+            match func.dfg.mem_flags[memflags].alias_region() {
                 None => self.other,
                 Some(AliasRegion::Heap) => self.heap,
                 Some(AliasRegion::Table) => self.table,

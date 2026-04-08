@@ -20,8 +20,8 @@ use cranelift_codegen::ir::{DebugTag, types::*};
 use cranelift_codegen::ir::{
     AbiParam, ArgumentExtension, ArgumentPurpose, Block, BlockArg, Constant, ConstantData,
     DynamicStackSlot, DynamicStackSlotData, DynamicTypeData, ExtFuncData, ExternalName, FuncRef,
-    Function, GlobalValue, GlobalValueData, JumpTableData, MemFlags, Opcode, SigRef, Signature,
-    StackSlot, StackSlotData, StackSlotKind, UserFuncName, Value, types,
+    Function, GlobalValue, GlobalValueData, JumpTableData, MemFlagsData, MemFlagsSet, Opcode,
+    SigRef, Signature, StackSlot, StackSlotData, StackSlotKind, UserFuncName, Value, types,
 };
 use cranelift_codegen::isa::{self, CallConv};
 use cranelift_codegen::packed_option::ReservedValue;
@@ -884,8 +884,8 @@ impl<'a> Parser<'a> {
     }
 
     // Match and a consume a possibly empty sequence of memory operation flags.
-    fn optional_memflags(&mut self) -> ParseResult<MemFlags> {
-        let mut flags = MemFlags::new();
+    fn optional_memflags(&mut self) -> ParseResult<MemFlagsData> {
+        let mut flags = MemFlagsData::new();
         while let Some(Token::Identifier(text)) = self.token() {
             match flags.set_by_name(text) {
                 Ok(true) => {
@@ -1464,7 +1464,7 @@ impl<'a> Parser<'a> {
                 }
                 Some(Token::GlobalValue(..)) => {
                     self.start_gathering_comments();
-                    self.parse_global_value_decl()
+                    self.parse_global_value_decl(&mut ctx.function.dfg.mem_flags)
                         .and_then(|(gv, dat)| ctx.add_gv(gv, dat, self.loc))
                 }
                 Some(Token::SigRef(..)) => {
@@ -1605,7 +1605,10 @@ impl<'a> Parser<'a> {
     //                   | "symbol" ["colocated"] name + imm64
     //                   | "dyn_scale_target_const" "." type
     //
-    fn parse_global_value_decl(&mut self) -> ParseResult<(GlobalValue, GlobalValueData)> {
+    fn parse_global_value_decl(
+        &mut self,
+        mem_flags: &mut MemFlagsSet,
+    ) -> ParseResult<(GlobalValue, GlobalValueData)> {
         let gv = self.match_gv("expected global value number: gv«n»")?;
 
         self.match_token(Token::Equal, "expected '=' in global value declaration")?;
@@ -1618,13 +1621,14 @@ impl<'a> Parser<'a> {
                     "expected '.' followed by type in load global value decl",
                 )?;
                 let global_type = self.match_type("expected load type")?;
-                let flags = self.optional_memflags()?;
+                let flags_data = self.optional_memflags()?;
                 let base = self.match_gv("expected global value: gv«n»")?;
                 let offset = self.optional_offset32()?;
 
-                if !(flags.notrap() && flags.aligned()) {
+                if !(flags_data.notrap() && flags_data.aligned()) {
                     return err!(self.loc, "global-value load must be notrap and aligned");
                 }
+                let flags = mem_flags.insert(flags_data);
                 GlobalValueData::Load {
                     base,
                     offset,
@@ -2911,6 +2915,7 @@ impl<'a> Parser<'a> {
             }
             InstructionFormat::Load => {
                 let flags = self.optional_memflags()?;
+                let flags = ctx.function.dfg.mem_flags.insert(flags);
                 let addr = self.match_value("expected SSA value address")?;
                 let offset = self.optional_offset32()?;
                 InstructionData::Load {
@@ -2922,6 +2927,7 @@ impl<'a> Parser<'a> {
             }
             InstructionFormat::Store => {
                 let flags = self.optional_memflags()?;
+                let flags = ctx.function.dfg.mem_flags.insert(flags);
                 let arg = self.match_value("expected SSA value operand")?;
                 self.match_token(Token::Comma, "expected ',' between operands")?;
                 let addr = self.match_value("expected SSA value address")?;
@@ -2945,6 +2951,7 @@ impl<'a> Parser<'a> {
             }
             InstructionFormat::AtomicCas => {
                 let flags = self.optional_memflags()?;
+                let flags = ctx.function.dfg.mem_flags.insert(flags);
                 let addr = self.match_value("expected SSA value address")?;
                 self.match_token(Token::Comma, "expected ',' between operands")?;
                 let expected = self.match_value("expected SSA value address")?;
@@ -2958,6 +2965,7 @@ impl<'a> Parser<'a> {
             }
             InstructionFormat::AtomicRmw => {
                 let flags = self.optional_memflags()?;
+                let flags = ctx.function.dfg.mem_flags.insert(flags);
                 let op = self.match_enum("expected AtomicRmwOp")?;
                 let addr = self.match_value("expected SSA value address")?;
                 self.match_token(Token::Comma, "expected ',' between operands")?;
@@ -2971,6 +2979,7 @@ impl<'a> Parser<'a> {
             }
             InstructionFormat::LoadNoOffset => {
                 let flags = self.optional_memflags()?;
+                let flags = ctx.function.dfg.mem_flags.insert(flags);
                 let addr = self.match_value("expected SSA value address")?;
                 InstructionData::LoadNoOffset {
                     opcode,
@@ -2980,6 +2989,7 @@ impl<'a> Parser<'a> {
             }
             InstructionFormat::StoreNoOffset => {
                 let flags = self.optional_memflags()?;
+                let flags = ctx.function.dfg.mem_flags.insert(flags);
                 let arg = self.match_value("expected SSA value operand")?;
                 self.match_token(Token::Comma, "expected ',' between operands")?;
                 let addr = self.match_value("expected SSA value address")?;

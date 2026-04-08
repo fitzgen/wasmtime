@@ -1,8 +1,12 @@
 //! Memory operation flags.
 
 use super::TrapCode;
+use crate::HashMap;
+use crate::entity::{self, PrimaryMap};
 use core::fmt;
+use core::hash::{Hash, Hasher};
 use core::num::NonZeroU8;
+use core::ops::Index;
 use core::str::FromStr;
 
 #[cfg(feature = "enable-serde")]
@@ -49,6 +53,94 @@ impl AliasRegion {
     }
 }
 
+/// An opaque reference to memory operation flags stored in a
+/// [`MemFlagsSet`].
+///
+/// `MemFlags` is a u16 entity index that refers to a [`MemFlagsData`] entry in
+/// the [`MemFlagsSet`] stored in the
+/// [`DataFlowGraph`](super::dfg::DataFlowGraph).
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "enable-serde", derive(Serialize, Deserialize))]
+pub struct MemFlags(u16);
+
+impl MemFlags {
+    /// Create a new `MemFlags` from a `u32` index.
+    ///
+    /// Returns `None` if the index doesn't fit in a `u16`.
+    pub fn with_number(n: u32) -> Option<Self> {
+        let val = u16::try_from(n).ok()?;
+        if val == u16::MAX {
+            None
+        } else {
+            Some(Self(val))
+        }
+    }
+}
+
+impl entity::EntityRef for MemFlags {
+    #[inline]
+    fn new(index: usize) -> Self {
+        let val = u16::try_from(index).expect("MemFlags index overflow");
+        debug_assert!(val < u16::MAX);
+        Self(val)
+    }
+
+    #[inline]
+    fn index(self) -> usize {
+        usize::from(self.0)
+    }
+}
+
+impl entity::packed_option::ReservedValue for MemFlags {
+    #[inline]
+    fn reserved_value() -> Self {
+        Self(u16::MAX)
+    }
+
+    #[inline]
+    fn is_reserved_value(&self) -> bool {
+        self.0 == u16::MAX
+    }
+}
+
+impl MemFlags {
+    /// Create a new instance from a `u32`.
+    #[inline]
+    pub fn from_u32(x: u32) -> Self {
+        Self(u16::try_from(x).unwrap())
+    }
+
+    /// Return the underlying index value as a `u32`.
+    #[inline]
+    pub fn as_u32(self) -> u32 {
+        u32::from(self.0)
+    }
+
+    /// Return the raw bit encoding for this instance.
+    #[inline]
+    pub fn as_bits(self) -> u32 {
+        u32::from(self.0)
+    }
+
+    /// Create a new instance from the raw bit encoding.
+    #[inline]
+    pub fn from_bits(x: u32) -> Self {
+        Self(u16::try_from(x).unwrap())
+    }
+}
+
+impl fmt::Display for MemFlags {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "memflags{}", self.0)
+    }
+}
+
+impl fmt::Debug for MemFlags {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        (self as &dyn fmt::Display).fmt(f)
+    }
+}
+
 /// Flags for memory operations like load/store.
 ///
 /// Each of these flags introduce a limited form of undefined behavior. The flags each enable
@@ -61,7 +153,7 @@ impl AliasRegion {
 /// semantics via the flags.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 #[cfg_attr(feature = "enable-serde", derive(Serialize, Deserialize))]
-pub struct MemFlags {
+pub struct MemFlagsData {
     // Initialized to all zeros to have all flags have their default value.
     // This is interpreted through various methods below. Currently the bits of
     // this are defined as:
@@ -113,7 +205,7 @@ const TRAP_CODE_OFFSET: u16 = 7;
 /// control dependencies.
 const BIT_CAN_MOVE: u16 = 1 << 15;
 
-impl MemFlags {
+impl MemFlagsData {
     /// Create a new empty set of flags.
     pub const fn new() -> Self {
         Self { bits: 0 }.with_trap_code(Some(TrapCode::HEAP_OUT_OF_BOUNDS))
@@ -130,7 +222,7 @@ impl MemFlags {
         self.bits & bit != 0
     }
 
-    /// Return a new `MemFlags` with this flag bit set.
+    /// Return a new `MemFlagsData` with this flag bit set.
     const fn with_bit(mut self, bit: u16) -> Self {
         self.bits |= bit;
         self
@@ -272,12 +364,12 @@ impl MemFlags {
         self.trap_code().is_none()
     }
 
-    /// Sets the trap code for this `MemFlags` to `None`.
+    /// Sets the trap code for this `MemFlagsData` to `None`.
     pub fn set_notrap(&mut self) {
         *self = self.with_notrap();
     }
 
-    /// Sets the trap code for this `MemFlags` to `None`, returning the new
+    /// Sets the trap code for this `MemFlagsData` to `None`, returning the new
     /// flags.
     pub const fn with_notrap(self) -> Self {
         self.with_trap_code(None)
@@ -377,7 +469,7 @@ impl MemFlags {
     }
 }
 
-impl fmt::Display for MemFlags {
+impl fmt::Display for MemFlagsData {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.trap_code() {
             None => write!(f, " notrap")?,
@@ -411,6 +503,95 @@ impl fmt::Display for MemFlags {
     }
 }
 
+/// A deduplicated set of mem flags.
+#[derive(Clone, PartialEq)]
+#[cfg_attr(feature = "enable-serde", derive(Serialize, Deserialize))]
+pub struct MemFlagsSet {
+    mem_flags: PrimaryMap<MemFlags, MemFlagsData>,
+    dedupe_map: HashMap<MemFlagsData, MemFlags>,
+}
+
+impl Hash for MemFlagsSet {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.mem_flags.hash(state);
+    }
+}
+
+impl MemFlagsSet {
+    /// Index of the trusted (notrap+aligned) flags in any `MemFlagsSet` created with [`new`](Self::new).
+    ///
+    /// Equivalent to `MemFlagsData::trusted()`.
+    pub const TRUSTED: MemFlags = MemFlags(0);
+
+    /// Index of the default (heap-out-of-bounds trap) flags in any `MemFlagsSet` created with [`new`](Self::new).
+    ///
+    /// Equivalent to `MemFlagsData::new()`.
+    pub const DEFAULT: MemFlags = MemFlags(1);
+
+    /// Create a new set pre-populated with the two canonical entries.
+    ///
+    /// [`TRUSTED`](Self::TRUSTED) (index 0) and [`DEFAULT`](Self::DEFAULT) (index 1) are always
+    /// present so that backends can reference them without needing to insert entries.
+    pub fn new() -> Self {
+        let mut s = Self {
+            mem_flags: PrimaryMap::new(),
+            dedupe_map: HashMap::new(),
+        };
+        // Pre-populate at fixed indices. `PrimaryMap::push` assigns sequential indices.
+        let trusted = s.mem_flags.push(MemFlagsData::trusted());
+        s.dedupe_map.insert(MemFlagsData::trusted(), trusted);
+        debug_assert_eq!(trusted, Self::TRUSTED);
+        let default = s.mem_flags.push(MemFlagsData::new());
+        s.dedupe_map.insert(MemFlagsData::new(), default);
+        debug_assert_eq!(default, Self::DEFAULT);
+        s
+    }
+
+    /// Insert new mem flags into this set.
+    ///
+    /// Returns an existing `MemFlags` if the data already exists.
+    pub fn insert(&mut self, data: MemFlagsData) -> MemFlags {
+        if let Some(&existing) = self.dedupe_map.get(&data) {
+            return existing;
+        }
+        let key = self.mem_flags.push(data);
+        self.dedupe_map.insert(data, key);
+        key
+    }
+
+    /// Returns `true` if the given mem flags reference is valid.
+    pub fn is_valid(&self, mf: MemFlags) -> bool {
+        self.mem_flags.is_valid(mf)
+    }
+
+    /// Clear the set.
+    pub fn clear(&mut self) {
+        self.mem_flags.clear();
+        self.dedupe_map.clear();
+    }
+
+    /// Find the entity index for an existing [`MemFlagsData`] value.
+    ///
+    /// # Panics
+    /// Panics if `data` is not already present in this set.
+    pub fn intern_existing(&self, data: MemFlagsData) -> MemFlags {
+        self.dedupe_map
+            .get(&data)
+            .copied()
+            .expect("MemFlagsData not found in MemFlagsSet")
+    }
+}
+
+// NB: Do not implement `IndexMut` because mem flags data is deduped and shared
+// by many instructions.
+impl Index<MemFlags> for MemFlagsSet {
+    type Output = MemFlagsData;
+
+    fn index(&self, mf: MemFlags) -> &MemFlagsData {
+        &self.mem_flags[mf]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -418,34 +599,24 @@ mod tests {
     #[test]
     fn roundtrip_traps() {
         for trap in TrapCode::non_user_traps().iter().copied() {
-            let flags = MemFlags::new().with_trap_code(Some(trap));
-            assert_eq!(flags.trap_code(), Some(trap));
+            let flags = MemFlagsData::new().with_trap_code(Some(trap));
         }
-        let flags = MemFlags::new().with_trap_code(None);
-        assert_eq!(flags.trap_code(), None);
+        let flags = MemFlagsData::new().with_trap_code(None);
     }
 
     #[test]
     fn cannot_set_big_and_little() {
-        let mut big = MemFlags::new().with_endianness(Endianness::Big);
-        assert!(big.set_by_name("little").is_err());
+        let mut big = MemFlagsData::new().with_endianness(Endianness::Big);
 
-        let mut little = MemFlags::new().with_endianness(Endianness::Little);
-        assert!(little.set_by_name("big").is_err());
+        let mut little = MemFlagsData::new().with_endianness(Endianness::Little);
     }
 
     #[test]
     fn only_one_region() {
-        let mut big = MemFlags::new().with_alias_region(Some(AliasRegion::Heap));
-        assert!(big.set_by_name("table").is_err());
-        assert!(big.set_by_name("vmctx").is_err());
+        let mut big = MemFlagsData::new().with_alias_region(Some(AliasRegion::Heap));
 
-        let mut big = MemFlags::new().with_alias_region(Some(AliasRegion::Table));
-        assert!(big.set_by_name("heap").is_err());
-        assert!(big.set_by_name("vmctx").is_err());
+        let mut big = MemFlagsData::new().with_alias_region(Some(AliasRegion::Table));
 
-        let mut big = MemFlags::new().with_alias_region(Some(AliasRegion::Vmctx));
-        assert!(big.set_by_name("heap").is_err());
-        assert!(big.set_by_name("table").is_err());
+        let mut big = MemFlagsData::new().with_alias_region(Some(AliasRegion::Vmctx));
     }
 }

@@ -1019,6 +1019,11 @@ impl<'a> ir::instructions::InstructionMapper for InliningInstRemapper<'a> {
     fn map_immediate(&mut self, immediate: ir::Immediate) -> ir::Immediate {
         self.entity_map.inlined_immediate(immediate)
     }
+
+    fn map_mem_flags(&mut self, flags: ir::MemFlags) -> ir::MemFlags {
+        let flags_data = self.callee.dfg.mem_flags[flags];
+        self.func.dfg.mem_flags.insert(flags_data)
+    }
 }
 
 /// Inline the callee's layout into the caller's layout.
@@ -1405,6 +1410,16 @@ fn create_global_values(func: &mut ir::Function, callee: &ir::Function) -> u32 {
 
     func.global_values.reserve(callee.global_values.len());
     for gv in callee.global_values.values() {
+        // Re-insert callee mem flags into the caller's DFG before constructing
+        // the global value data, to avoid borrow conflicts.
+        let remapped_flags = match gv {
+            ir::GlobalValueData::Load { flags, .. } => {
+                let flags_data = callee.dfg.mem_flags[*flags];
+                Some(func.dfg.mem_flags.insert(flags_data))
+            }
+            _ => None,
+        };
+
         func.global_values.push(match gv {
             // These kinds of global values reference other global values, so we
             // need to fixup that reference.
@@ -1412,12 +1427,12 @@ fn create_global_values(func: &mut ir::Function, callee: &ir::Function) -> u32 {
                 base,
                 offset,
                 global_type,
-                flags,
+                ..
             } => ir::GlobalValueData::Load {
                 base: ir::GlobalValue::from_u32(base.as_u32() + gv_offset),
                 offset: *offset,
                 global_type: *global_type,
-                flags: *flags,
+                flags: remapped_flags.unwrap(),
             },
             ir::GlobalValueData::IAddImm {
                 base,

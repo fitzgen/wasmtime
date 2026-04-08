@@ -1212,7 +1212,8 @@ impl<'func, I: VCodeInst> Lower<'func, I> {
             "built vcode:\n{:?}Backwards {:?}",
             &self.vregs, &self.vcode.vcode
         );
-        let vcode = self.vcode.build(self.vregs);
+        let mut vcode = self.vcode.build(self.vregs);
+        vcode.set_mem_flags(self.f.dfg.mem_flags.clone());
 
         Ok(vcode)
     }

@@ -79,7 +79,7 @@ fn unbarriered_load_gc_ref(
     builder: &mut FunctionBuilder,
     ty: WasmHeapType,
     ptr_to_gc_ref: ir::Value,
-    flags: ir::MemFlags,
+    flags: ir::MemFlagsData,
 ) -> WasmResult<ir::Value> {
     debug_assert!(ty.is_vmgcref_type());
     let gc_ref = builder.ins().load(ir::types::I32, flags, ptr_to_gc_ref, 0);
@@ -98,7 +98,7 @@ fn unbarriered_store_gc_ref(
     ty: WasmHeapType,
     dst: ir::Value,
     gc_ref: ir::Value,
-    flags: ir::MemFlags,
+    flags: ir::MemFlagsData,
 ) -> WasmResult<()> {
     debug_assert!(ty.is_vmgcref_type());
     builder.ins().store(flags, gc_ref, dst, 0);
@@ -163,7 +163,7 @@ fn emit_gc_kind_assert(
     );
     let kind_and_reserved_bits = builder.ins().load(
         ir::types::I32,
-        ir::MemFlags::trusted().with_readonly(),
+        ir::MemFlagsData::trusted().with_readonly(),
         kind_addr,
         0,
     );
@@ -202,7 +202,7 @@ fn read_field_at_addr(
     );
 
     // Data inside GC objects is always little endian.
-    let flags = ir::MemFlags::trusted().with_endianness(ir::Endianness::Little);
+    let flags = ir::MemFlagsData::trusted().with_endianness(ir::Endianness::Little);
 
     let value = match ty {
         WasmStorageType::I8 => builder.ins().load(ir::types::I8, flags, addr, 0),
@@ -273,7 +273,7 @@ fn write_func_ref_at_addr(
     func_env: &mut FuncEnvironment<'_>,
     builder: &mut FunctionBuilder<'_>,
     ref_type: WasmRefType,
-    flags: ir::MemFlags,
+    flags: ir::MemFlagsData,
     field_addr: ir::Value,
     func_ref: ir::Value,
 ) -> WasmResult<()> {
@@ -321,7 +321,7 @@ fn write_field_at_addr(
     new_val: ir::Value,
 ) -> WasmResult<()> {
     // Data inside GC objects is always little endian.
-    let flags = ir::MemFlags::trusted().with_endianness(ir::Endianness::Little);
+    let flags = ir::MemFlagsData::trusted().with_endianness(ir::Endianness::Little);
 
     match field_ty {
         WasmStorageType::I8 => {
@@ -930,7 +930,7 @@ pub fn translate_array_len(
     );
     let result = builder.ins().load(
         ir::types::I32,
-        ir::MemFlags::trusted().with_readonly(),
+        ir::MemFlagsData::trusted().with_readonly(),
         len_field,
         0,
     );
@@ -1246,7 +1246,7 @@ pub fn translate_ref_test(
         );
         let actual_kind = builder.ins().load(
             ir::types::I32,
-            ir::MemFlags::trusted().with_readonly(),
+            ir::MemFlagsData::trusted().with_readonly(),
             kind_addr,
             0,
         );
@@ -1303,7 +1303,7 @@ pub fn translate_ref_test(
             );
             let actual_shared_ty = builder.ins().load(
                 ir::types::I32,
-                ir::MemFlags::trusted().with_readonly(),
+                ir::MemFlagsData::trusted().with_readonly(),
                 ty_addr,
                 0,
             );
@@ -1321,7 +1321,7 @@ pub fn translate_ref_test(
 
             let actual_shared_ty = func_env.load_funcref_type_index(
                 &mut builder.cursor(),
-                ir::MemFlags::trusted().with_readonly(),
+                ir::MemFlagsData::trusted().with_readonly(),
                 val,
             );
 
@@ -1490,7 +1490,7 @@ impl FuncEnvironment<'_> {
         let store_context_ptr = self.get_vmstore_context_ptr_global(func);
         let offset = self.offsets.ptr.vmstore_context_gc_heap_base();
 
-        let mut flags = ir::MemFlags::trusted();
+        let mut flags = ir::MemFlagsData::trusted();
         let memory_tunables =
             wasmtime_environ::MemoryTunables::new(self.tunables, MemoryKind::GcHeap);
         if !self
@@ -1502,6 +1502,7 @@ impl FuncEnvironment<'_> {
             flags.set_can_move();
         }
 
+        let flags = func.dfg.mem_flags.insert(flags);
         let base = func.create_global_value(ir::GlobalValueData::Load {
             base: store_context_ptr,
             offset: Offset32::new(offset.into()),
@@ -1526,11 +1527,12 @@ impl FuncEnvironment<'_> {
         }
         let store_context_ptr = self.get_vmstore_context_ptr_global(func);
         let offset = self.offsets.ptr.vmstore_context_gc_heap_current_length();
+        let flags = func.dfg.mem_flags.insert(ir::MemFlagsData::trusted());
         let bound = func.create_global_value(ir::GlobalValueData::Load {
             base: store_context_ptr,
             offset: Offset32::new(offset.into()),
             global_type: self.pointer_type(),
-            flags: ir::MemFlags::trusted(),
+            flags,
         });
         self.gc_heap_bound = Some(bound);
         bound
