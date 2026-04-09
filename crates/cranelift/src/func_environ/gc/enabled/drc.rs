@@ -39,9 +39,13 @@ impl DrcCompiler {
                 access_size: u8::try_from(ir::types::I64.bytes()).unwrap(),
             },
         );
-        builder
-            .ins()
-            .load(ir::types::I64, ir::MemFlagsData::trusted(), pointer, 0)
+        let gc_heap_region = func_env.gc_heap_alias_region(&mut builder.func);
+        builder.ins().load(
+            ir::types::I64,
+            ir::MemFlagsData::trusted().with_alias_region(Some(gc_heap_region)),
+            pointer,
+            0,
+        )
     }
 
     /// Generate code to update the given GC reference's ref count to the new
@@ -64,9 +68,13 @@ impl DrcCompiler {
                 access_size: u8::try_from(ir::types::I64.bytes()).unwrap(),
             },
         );
-        builder
-            .ins()
-            .store(ir::MemFlagsData::trusted(), new_ref_count, pointer, 0);
+        let gc_heap_region = func_env.gc_heap_alias_region(&mut builder.func);
+        builder.ins().store(
+            ir::MemFlagsData::trusted().with_alias_region(Some(gc_heap_region)),
+            new_ref_count,
+            pointer,
+            0,
+        );
     }
 
     /// Generate code to increment or decrement the given GC reference's ref
@@ -106,11 +114,16 @@ impl DrcCompiler {
 
         let head = self.load_over_approximated_stack_roots_head(func_env, builder);
 
+        let gc_heap_region = func_env.gc_heap_alias_region(&mut builder.func);
+
         // Load the current first list element, which will be our new next list
         // element.
-        let next = builder
-            .ins()
-            .load(ir::types::I32, ir::MemFlagsData::trusted(), head, 0);
+        let next = builder.ins().load(
+            ir::types::I32,
+            ir::MemFlagsData::trusted().with_alias_region(Some(gc_heap_region)),
+            head,
+            0,
+        );
 
         // Update our object's header to point to `next` and consider itself part of the list.
         self.set_next_over_approximated_stack_root(func_env, builder, gc_ref, next);
@@ -120,9 +133,12 @@ impl DrcCompiler {
         self.mutate_ref_count(func_env, builder, gc_ref, 1);
 
         // Commit this object as the new head of the list.
-        builder
-            .ins()
-            .store(ir::MemFlagsData::trusted(), gc_ref, head, 0);
+        builder.ins().store(
+            ir::MemFlagsData::trusted().with_alias_region(Some(gc_heap_region)),
+            gc_ref,
+            head,
+            0,
+        );
     }
 
     /// Load a pointer to the first element of the DRC heap's
@@ -133,13 +149,17 @@ impl DrcCompiler {
         builder: &mut FunctionBuilder,
     ) -> ir::Value {
         let ptr_ty = func_env.pointer_type();
+        let gc_heap_data_offset = u32::from(func_env.offsets.ptr.vmctx_gc_heap_data());
+        let vmctx_region = func_env.vmctx_alias_region(&mut builder.func, gc_heap_data_offset);
         let vmctx = func_env.vmctx(&mut builder.func);
         let vmctx = builder.ins().global_value(ptr_ty, vmctx);
         builder.ins().load(
             ptr_ty,
-            ir::MemFlagsData::trusted().with_readonly(),
+            ir::MemFlagsData::trusted()
+                .with_readonly()
+                .with_alias_region(Some(vmctx_region)),
             vmctx,
-            i32::from(func_env.offsets.ptr.vmctx_gc_heap_data()),
+            i32::try_from(gc_heap_data_offset).unwrap(),
         )
     }
 
@@ -163,9 +183,13 @@ impl DrcCompiler {
                 access_size: u8::try_from(ir::types::I32.bytes()).unwrap(),
             },
         );
-        builder
-            .ins()
-            .store(ir::MemFlagsData::trusted(), next, ptr, 0);
+        let gc_heap_region = func_env.gc_heap_alias_region(&mut builder.func);
+        builder.ins().store(
+            ir::MemFlagsData::trusted().with_alias_region(Some(gc_heap_region)),
+            next,
+            ptr,
+            0,
+        );
     }
 
     /// Set the in-over-approximated-stack-roots list bit in a `VMDrcHeader`'s
@@ -201,9 +225,13 @@ impl DrcCompiler {
                 access_size: u8::try_from(ir::types::I32.bytes()).unwrap(),
             },
         );
-        builder
-            .ins()
-            .store(ir::MemFlagsData::trusted(), new_reserved, ptr, 0);
+        let gc_heap_region = func_env.gc_heap_alias_region(&mut builder.func);
+        builder.ins().store(
+            ir::MemFlagsData::trusted().with_alias_region(Some(gc_heap_region)),
+            new_reserved,
+            ptr,
+            0,
+        );
     }
 
     /// Write to an uninitialized field or element inside a GC object.
@@ -216,7 +244,10 @@ impl DrcCompiler {
         val: ir::Value,
     ) -> WasmResult<()> {
         // Data inside GC objects is always little endian.
-        let flags = ir::MemFlagsData::trusted().with_endianness(ir::Endianness::Little);
+        let gc_heap_region = func_env.gc_heap_alias_region(&mut builder.func);
+        let flags = ir::MemFlagsData::trusted()
+            .with_endianness(ir::Endianness::Little)
+            .with_alias_region(Some(gc_heap_region));
 
         match ty {
             WasmStorageType::Val(WasmValType::Ref(r)) => match r.heap_type.top() {
@@ -398,9 +429,13 @@ impl GcCompiler for DrcCompiler {
         let object_addr = builder.ins().iadd(base, extended_array_ref);
         let len_addr = builder.ins().iadd_imm(object_addr, i64::from(len_offset));
         let len = init.len(&mut builder.cursor());
-        builder
-            .ins()
-            .store(ir::MemFlagsData::trusted(), len, len_addr, 0);
+        let gc_heap_region = func_env.gc_heap_alias_region(&mut builder.func);
+        builder.ins().store(
+            ir::MemFlagsData::trusted().with_alias_region(Some(gc_heap_region)),
+            len,
+            len_addr,
+            0,
+        );
 
         // Finally, initialize the elements.
         let len_to_elems_delta = builder.ins().iconst(ptr_ty, i64::from(len_to_elems_delta));
@@ -668,9 +703,13 @@ impl GcCompiler for DrcCompiler {
                 access_size: u8::try_from(ir::types::I32.bytes()).unwrap(),
             },
         );
-        let reserved = builder
-            .ins()
-            .load(ir::types::I32, ir::MemFlagsData::trusted(), ptr, 0);
+        let gc_heap_region = func_env.gc_heap_alias_region(&mut builder.func);
+        let reserved = builder.ins().load(
+            ir::types::I32,
+            ir::MemFlagsData::trusted().with_alias_region(Some(gc_heap_region)),
+            ptr,
+            0,
+        );
         let in_set_bit = builder.ins().iconst(
             ir::types::I32,
             i64::from(wasmtime_environ::drc::HEADER_IN_OVER_APPROX_LIST_BIT),

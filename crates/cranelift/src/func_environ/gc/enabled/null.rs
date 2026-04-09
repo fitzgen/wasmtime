@@ -70,16 +70,24 @@ impl NullCompiler {
         // Load the bump "pointer" (it is actually an index into the GC heap,
         // not a raw pointer).
         let pointer_type = func_env.pointer_type();
+        let gc_heap_data_offset = u32::from(func_env.offsets.ptr.vmctx_gc_heap_data());
+        let vmctx_region = func_env.vmctx_alias_region(&mut builder.func, gc_heap_data_offset);
         let vmctx = func_env.vmctx_val(&mut builder.cursor());
         let ptr_to_next = builder.ins().load(
             pointer_type,
-            ir::MemFlagsData::trusted().with_readonly(),
+            ir::MemFlagsData::trusted()
+                .with_readonly()
+                .with_alias_region(Some(vmctx_region)),
             vmctx,
-            i32::from(func_env.offsets.ptr.vmctx_gc_heap_data()),
+            i32::try_from(gc_heap_data_offset).unwrap(),
         );
-        let next = builder
-            .ins()
-            .load(ir::types::I32, ir::MemFlagsData::trusted(), ptr_to_next, 0);
+        let gc_heap_region = func_env.gc_heap_alias_region(&mut builder.func);
+        let next = builder.ins().load(
+            ir::types::I32,
+            ir::MemFlagsData::trusted().with_alias_region(Some(gc_heap_region)),
+            ptr_to_next,
+            0,
+        );
 
         // Increment the bump "pointer" to the requested alignment:
         //
@@ -156,21 +164,25 @@ impl NullCompiler {
                 i64::from(VMSharedTypeIndex::reserved_value().as_bits()),
             ),
         };
+        let gc_heap_region = func_env.gc_heap_alias_region(&mut builder.func);
         builder.ins().store(
-            ir::MemFlagsData::trusted(),
+            ir::MemFlagsData::trusted().with_alias_region(Some(gc_heap_region)),
             kind_and_size,
             ptr_to_object,
             i32::try_from(wasmtime_environ::VM_GC_HEADER_KIND_OFFSET).unwrap(),
         );
         builder.ins().store(
-            ir::MemFlagsData::trusted(),
+            ir::MemFlagsData::trusted().with_alias_region(Some(gc_heap_region)),
             ty,
             ptr_to_object,
             i32::try_from(wasmtime_environ::VM_GC_HEADER_TYPE_INDEX_OFFSET).unwrap(),
         );
-        builder
-            .ins()
-            .store(ir::MemFlagsData::trusted(), end_of_object, ptr_to_next, 0);
+        builder.ins().store(
+            ir::MemFlagsData::trusted().with_alias_region(Some(gc_heap_region)),
+            end_of_object,
+            ptr_to_next,
+            0,
+        );
 
         log::trace!("emit_inline_alloc(..) -> ({aligned}, {ptr_to_object})");
         (aligned, ptr_to_object)
@@ -223,9 +235,13 @@ impl GcCompiler for NullCompiler {
         // any pointers or offsets out from the (untrusted) GC heap.
         let len_addr = builder.ins().iadd_imm(ptr_to_object, i64::from(len_offset));
         let len = init.len(&mut builder.cursor());
-        builder
-            .ins()
-            .store(ir::MemFlagsData::trusted(), len, len_addr, 0);
+        let gc_heap_region = func_env.gc_heap_alias_region(&mut builder.func);
+        builder.ins().store(
+            ir::MemFlagsData::trusted().with_alias_region(Some(gc_heap_region)),
+            len,
+            len_addr,
+            0,
+        );
 
         // Finally, initialize the elements.
         let len_to_elems_delta = builder.ins().iconst(ptr_ty, i64::from(len_to_elems_delta));

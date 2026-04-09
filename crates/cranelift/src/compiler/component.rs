@@ -1724,15 +1724,30 @@ impl ComponentCompiler for Compiler {
                 let pointer_type = self.isa.pointer_type();
 
                 // Load the `*mut VMStoreContext` out of our vmctx.
+                let vmctx_key = wasmtime_environ::AliasRegionKey::VMContext {
+                    offset: c.offsets.vm_store_context(),
+                };
                 let vmctx_region = c
                     .builder
                     .func
                     .dfg
                     .alias_regions
                     .insert(ir::AliasRegionData {
-                        user_id: 2,
-                        description: "vmctx".into(),
+                        user_id: vmctx_key.into_raw(),
+                        description: format!("{vmctx_key:?}").into(),
                     });
+                let store_ctx_key = wasmtime_environ::AliasRegionKey::VMStoreContext {
+                    offset: u32::from(c.offsets.ptr.vmstore_context_store_data()),
+                };
+                let store_ctx_region =
+                    c.builder
+                        .func
+                        .dfg
+                        .alias_regions
+                        .insert(ir::AliasRegionData {
+                            user_id: store_ctx_key.into_raw(),
+                            description: format!("{store_ctx_key:?}").into(),
+                        });
                 let store_ctx = c.builder.ins().load(
                     pointer_type,
                     ir::MemFlagsData::trusted()
@@ -1748,7 +1763,7 @@ impl ComponentCompiler for Compiler {
                     pointer_type,
                     ir::MemFlagsData::trusted()
                         .with_readonly()
-                        .with_alias_region(Some(vmctx_region))
+                        .with_alias_region(Some(store_ctx_region))
                         .with_can_move(),
                     store_ctx,
                     i32::from(c.offsets.ptr.vmstore_context_store_data()),

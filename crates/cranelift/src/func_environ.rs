@@ -231,10 +231,7 @@ pub struct FuncEnvironment<'module_environment> {
     pub(crate) next_srcloc: ir::SourceLoc,
 
     /// Cached alias regions for alias analysis.
-    heap_alias_region: Option<ir::AliasRegion>,
-    table_alias_region: Option<ir::AliasRegion>,
-    #[allow(dead_code)]
-    vmctx_alias_region: Option<ir::AliasRegion>,
+    alias_regions: std::collections::HashMap<wasmtime_environ::AliasRegionKey, ir::AliasRegion>,
 }
 
 impl<'module_environment> FuncEnvironment<'module_environment> {
@@ -297,9 +294,7 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
             state_slot: None,
             next_srcloc: ir::SourceLoc::default(),
             wasm_module_offset: translation.wasm_module_offset,
-            heap_alias_region: None,
-            table_alias_region: None,
-            vmctx_alias_region: None,
+            alias_regions: std::collections::HashMap::new(),
         }
     }
 
@@ -315,32 +310,77 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
         })
     }
 
-    pub(crate) fn get_heap_alias_region(&mut self, func: &mut Function) -> ir::AliasRegion {
-        *self.heap_alias_region.get_or_insert_with(|| {
+    pub(crate) fn alias_region(
+        &mut self,
+        func: &mut Function,
+        key: wasmtime_environ::AliasRegionKey,
+    ) -> ir::AliasRegion {
+        *self.alias_regions.entry(key).or_insert_with(|| {
+            let user_id = key.into_raw();
             func.dfg.alias_regions.insert(ir::AliasRegionData {
-                user_id: 0,
-                description: "heap".into(),
+                user_id,
+                description: format!("{key:?}").into(),
             })
         })
     }
 
-    pub(crate) fn get_table_alias_region(&mut self, func: &mut Function) -> ir::AliasRegion {
-        *self.table_alias_region.get_or_insert_with(|| {
-            func.dfg.alias_regions.insert(ir::AliasRegionData {
-                user_id: 1,
-                description: "table".into(),
-            })
-        })
+    pub(crate) fn memory_alias_region(
+        &mut self,
+        func: &mut Function,
+        memory: MemoryIndex,
+    ) -> ir::AliasRegion {
+        let key = match self.module.defined_memory_index(memory) {
+            Some(def) => wasmtime_environ::AliasRegionKey::DefinedMemory {
+                module: self.translation.module_index(),
+                index: def,
+            },
+            None => wasmtime_environ::AliasRegionKey::ImportedMemory,
+        };
+        self.alias_region(func, key)
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn get_vmctx_alias_region(&mut self, func: &mut Function) -> ir::AliasRegion {
-        *self.vmctx_alias_region.get_or_insert_with(|| {
-            func.dfg.alias_regions.insert(ir::AliasRegionData {
-                user_id: 2,
-                description: "vmctx".into(),
-            })
-        })
+    pub(crate) fn table_alias_region(
+        &mut self,
+        func: &mut Function,
+        table: TableIndex,
+    ) -> ir::AliasRegion {
+        let key = match self.module.defined_table_index(table) {
+            Some(def) => wasmtime_environ::AliasRegionKey::DefinedTable {
+                module: self.translation.module_index(),
+                index: def,
+            },
+            None => wasmtime_environ::AliasRegionKey::ImportedTable,
+        };
+        self.alias_region(func, key)
+    }
+
+    pub(crate) fn global_alias_region(
+        &mut self,
+        func: &mut Function,
+        global: GlobalIndex,
+    ) -> ir::AliasRegion {
+        let key = match self.module.defined_global_index(global) {
+            Some(def) => wasmtime_environ::AliasRegionKey::DefinedGlobal {
+                module: self.translation.module_index(),
+                index: def,
+            },
+            None => wasmtime_environ::AliasRegionKey::ImportedGlobal,
+        };
+        self.alias_region(func, key)
+    }
+
+    #[cfg_attr(not(feature = "gc"), allow(dead_code))]
+    pub(crate) fn gc_heap_alias_region(&mut self, func: &mut Function) -> ir::AliasRegion {
+        self.alias_region(func, wasmtime_environ::AliasRegionKey::GcHeap)
+    }
+
+    #[cfg_attr(not(feature = "gc"), allow(dead_code))]
+    pub(crate) fn vmctx_alias_region(
+        &mut self,
+        func: &mut Function,
+        offset: u32,
+    ) -> ir::AliasRegion {
+        self.alias_region(func, wasmtime_environ::AliasRegionKey::VMContext { offset })
     }
 
     fn get_table_copy_func(
@@ -891,7 +931,8 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
         // contents, we check for a null entry here, and
         // if null, we take a slow-path that invokes a
         // libcall.
-        let (table_entry_addr, flags) = table_data.prepare_table_addr(self, builder, index);
+        let (table_entry_addr, flags) =
+            table_data.prepare_table_addr(self, builder, index, table_index);
         let value = builder.ins().load(pointer_type, flags, table_entry_addr, 0);
 
         if !self.tunables.table_lazy_init {
@@ -2538,7 +2579,7 @@ impl FuncEnvironment<'_> {
         match heap_ty.top() {
             // GC-managed types.
             WasmHeapTopType::Any | WasmHeapTopType::Extern | WasmHeapTopType::Exn => {
-                let (src, flags) = table_data.prepare_table_addr(self, builder, index);
+                let (src, flags) = table_data.prepare_table_addr(self, builder, index, table_index);
                 gc::gc_compiler(self)?.translate_read_gc_reference(
                     self,
                     builder,
@@ -2555,7 +2596,8 @@ impl FuncEnvironment<'_> {
 
             // Continuation types.
             WasmHeapTopType::Cont => {
-                let (elem_addr, flags) = table_data.prepare_table_addr(self, builder, index);
+                let (elem_addr, flags) =
+                    table_data.prepare_table_addr(self, builder, index, table_index);
                 Ok(builder.ins().load(
                     stack_switching::fatpointer::fatpointer_type(self),
                     flags,
@@ -2579,7 +2621,7 @@ impl FuncEnvironment<'_> {
         match heap_ty.top() {
             // GC-managed types.
             WasmHeapTopType::Any | WasmHeapTopType::Extern | WasmHeapTopType::Exn => {
-                let (dst, flags) = table_data.prepare_table_addr(self, builder, index);
+                let (dst, flags) = table_data.prepare_table_addr(self, builder, index, table_index);
                 gc::gc_compiler(self)?.translate_write_gc_reference(
                     self,
                     builder,
@@ -2592,7 +2634,8 @@ impl FuncEnvironment<'_> {
 
             // Function types.
             WasmHeapTopType::Func => {
-                let (elem_addr, flags) = table_data.prepare_table_addr(self, builder, index);
+                let (elem_addr, flags) =
+                    table_data.prepare_table_addr(self, builder, index, table_index);
                 // Set the "initialized bit". See doc-comment on
                 // `FUNCREF_INIT_BIT` in
                 // crates/environ/src/ref_bits.rs for details.
@@ -2611,7 +2654,8 @@ impl FuncEnvironment<'_> {
 
             // Continuation types.
             WasmHeapTopType::Cont => {
-                let (elem_addr, flags) = table_data.prepare_table_addr(self, builder, index);
+                let (elem_addr, flags) =
+                    table_data.prepare_table_addr(self, builder, index, table_index);
                 builder.ins().store(flags, value, elem_addr, 0);
                 Ok(())
             }
@@ -3109,8 +3153,7 @@ impl FuncEnvironment<'_> {
                 if ty.is_vector() {
                     flags.set_endianness(ir::Endianness::Little);
                 }
-                // Put globals in the "table" abstract heap category as well.
-                let region = self.get_table_alias_region(builder.func);
+                let region = self.global_alias_region(builder.func, global_index);
                 flags.set_alias_region(Some(region));
                 Ok(builder.ins().load(ty, flags, addr, offset))
             }
@@ -3161,8 +3204,7 @@ impl FuncEnvironment<'_> {
                 if ty.is_vector() {
                     flags.set_endianness(ir::Endianness::Little);
                 }
-                // Put globals in the "table" abstract heap category as well.
-                let region = self.get_table_alias_region(builder.func);
+                let region = self.global_alias_region(builder.func, global_index);
                 flags.set_alias_region(Some(region));
                 debug_assert_eq!(ty, builder.func.dfg.value_type(val));
                 builder.ins().store(flags, val, addr, offset);

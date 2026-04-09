@@ -10,6 +10,7 @@
   )
 )
 ;; function u0:0(i64 vmctx, i64, i32, i32, i64, i32) tail {
+;;     region0 = 2147483648 "GcHeap"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24
@@ -27,7 +28,7 @@
 ;; @0027                               v8 = iadd v7, v6
 ;; @0027                               v9 = iconst.i64 24
 ;; @0027                               v10 = iadd v8, v9  ; v9 = 24
-;; @0027                               v11 = load.i32 notrap aligned readonly v10
+;; @0027                               v11 = load.i32 notrap aligned readonly region0 v10
 ;; @0027                               v12 = uadd_overflow_trap v3, v5, user16
 ;; @0027                               v13 = icmp ugt v12, v11
 ;; @0027                               trapnz v13, user16
@@ -60,7 +61,7 @@
 ;; @0027                               brif v36, block4, block3
 ;;
 ;;                                 block3:
-;; @0027                               store.i64 notrap aligned little v4, v35
+;; @0027                               store.i64 notrap aligned little region0 v4, v35
 ;;                                     v66 = iconst.i64 8
 ;;                                     v67 = iadd.i64 v35, v66  ; v66 = 8
 ;; @0027                               jump block2(v67)

@@ -13,6 +13,8 @@
 )
 
 ;; function u0:0(i64 vmctx, i64) -> i32 tail {
+;;     region0 = 2147483648 "GcHeap"
+;;     region1 = 32 "VMContext+0x20"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24
@@ -39,27 +41,27 @@
 ;; @0034                               v11 = load.i64 notrap aligned readonly can_move v50+32
 ;; @0034                               v10 = uextend.i64 v5
 ;; @0034                               v12 = iadd v11, v10
-;; @0034                               v13 = load.i32 notrap aligned v12
+;; @0034                               v13 = load.i32 notrap aligned region0 v12
 ;; @0034                               v14 = iconst.i32 2
 ;; @0034                               v15 = band v13, v14  ; v14 = 2
 ;; @0034                               brif v15, block4, block3
 ;;
 ;;                                 block3:
-;; @0034                               v17 = load.i64 notrap aligned readonly v0+32
-;; @0034                               v18 = load.i32 notrap aligned v17
+;; @0034                               v17 = load.i64 notrap aligned readonly region1 v0+32
+;; @0034                               v18 = load.i32 notrap aligned region0 v17
 ;; @0034                               v22 = iconst.i64 16
 ;; @0034                               v23 = iadd.i64 v12, v22  ; v22 = 16
-;; @0034                               store notrap aligned v18, v23
+;; @0034                               store notrap aligned region0 v18, v23
 ;;                                     v55 = iconst.i32 2
 ;;                                     v56 = bor.i32 v13, v55  ; v55 = 2
-;; @0034                               store notrap aligned v56, v12
+;; @0034                               store notrap aligned region0 v56, v12
 ;; @0034                               v32 = iconst.i64 8
 ;; @0034                               v33 = iadd.i64 v12, v32  ; v32 = 8
-;; @0034                               v34 = load.i64 notrap aligned v33
+;; @0034                               v34 = load.i64 notrap aligned region0 v33
 ;;                                     v43 = iconst.i64 1
 ;; @0034                               v35 = iadd v34, v43  ; v43 = 1
-;; @0034                               store notrap aligned v35, v33
-;; @0034                               store.i32 notrap aligned v5, v17
+;; @0034                               store notrap aligned region0 v35, v33
+;; @0034                               store.i32 notrap aligned region0 v5, v17
 ;; @0034                               jump block4
 ;;
 ;;                                 block4:
@@ -70,6 +72,7 @@
 ;; }
 ;;
 ;; function u0:1(i64 vmctx, i64, i32) tail {
+;;     region0 = 2147483648 "GcHeap"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24
@@ -100,10 +103,10 @@
 ;; @003b                               v12 = iadd v27, v10
 ;; @003b                               v29 = iconst.i64 8
 ;; @003b                               v14 = iadd v12, v29  ; v29 = 8
-;; @003b                               v15 = load.i64 notrap aligned v14
-;;                                     v63 = iconst.i64 1
-;; @003b                               v16 = iadd v15, v63  ; v63 = 1
-;; @003b                               store notrap aligned v16, v14
+;; @003b                               v15 = load.i64 notrap aligned region0 v14
+;;                                     v64 = iconst.i64 1
+;; @003b                               v16 = iadd v15, v64  ; v64 = 1
+;; @003b                               store notrap aligned region0 v16, v14
 ;; @003b                               jump block3
 ;;
 ;;                                 block3:
@@ -124,7 +127,7 @@
 ;; @003b                               v28 = iadd v75, v26
 ;;                                     v76 = iconst.i64 8
 ;; @003b                               v30 = iadd v28, v76  ; v76 = 8
-;; @003b                               v31 = load.i64 notrap aligned v30
+;; @003b                               v31 = load.i64 notrap aligned region0 v30
 ;;                                     v77 = iconst.i64 1
 ;;                                     v67 = icmp eq v31, v77  ; v77 = 1
 ;; @003b                               brif v67, block5, block6
@@ -137,7 +140,7 @@
 ;;                                     v43 = iconst.i64 -1
 ;; @003b                               v32 = iadd.i64 v31, v43  ; v43 = -1
 ;;                                     v78 = iadd.i64 v28, v76  ; v76 = 8
-;; @003b                               store notrap aligned v32, v78
+;; @003b                               store notrap aligned region0 v32, v78
 ;; @003b                               jump block7
 ;;
 ;;                                 block7:

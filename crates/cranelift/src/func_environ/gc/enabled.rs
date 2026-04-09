@@ -161,9 +161,12 @@ fn emit_gc_kind_assert(
             object_size: wasmtime_environ::VM_GC_HEADER_SIZE,
         },
     );
+    let gc_heap_region = func_env.gc_heap_alias_region(&mut builder.func);
     let kind_and_reserved_bits = builder.ins().load(
         ir::types::I32,
-        ir::MemFlagsData::trusted().with_readonly(),
+        ir::MemFlagsData::trusted()
+            .with_readonly()
+            .with_alias_region(Some(gc_heap_region)),
         kind_addr,
         0,
     );
@@ -202,7 +205,10 @@ fn read_field_at_addr(
     );
 
     // Data inside GC objects is always little endian.
-    let flags = ir::MemFlagsData::trusted().with_endianness(ir::Endianness::Little);
+    let gc_heap_region = func_env.gc_heap_alias_region(&mut builder.func);
+    let flags = ir::MemFlagsData::trusted()
+        .with_endianness(ir::Endianness::Little)
+        .with_alias_region(Some(gc_heap_region));
 
     let value = match ty {
         WasmStorageType::I8 => builder.ins().load(ir::types::I8, flags, addr, 0),
@@ -321,7 +327,10 @@ fn write_field_at_addr(
     new_val: ir::Value,
 ) -> WasmResult<()> {
     // Data inside GC objects is always little endian.
-    let flags = ir::MemFlagsData::trusted().with_endianness(ir::Endianness::Little);
+    let gc_heap_region = func_env.gc_heap_alias_region(&mut builder.func);
+    let flags = ir::MemFlagsData::trusted()
+        .with_endianness(ir::Endianness::Little)
+        .with_alias_region(Some(gc_heap_region));
 
     match field_ty {
         WasmStorageType::I8 => {
@@ -928,9 +937,12 @@ pub fn translate_array_len(
             access_size: u8::try_from(ir::types::I32.bytes()).unwrap(),
         },
     );
+    let gc_heap_region = func_env.gc_heap_alias_region(&mut builder.func);
     let result = builder.ins().load(
         ir::types::I32,
-        ir::MemFlagsData::trusted().with_readonly(),
+        ir::MemFlagsData::trusted()
+            .with_readonly()
+            .with_alias_region(Some(gc_heap_region)),
         len_field,
         0,
     );

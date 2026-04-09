@@ -17,7 +17,8 @@
     table.set 0))
 
 ;; function u0:0(i64 vmctx, i64, i32) tail {
-;;     region0 = 1 "table"
+;;     region0 = 1342177280 "DefinedTable(StaticModuleIndex(0), DefinedTableIndex(0))"
+;;     region1 = 2147483648 "GcHeap"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24
@@ -59,7 +60,7 @@
 ;; @0055                               v20 = iadd v19, v18
 ;; @0055                               v21 = iconst.i64 8
 ;; @0055                               v22 = iadd v20, v21  ; v21 = 8
-;; @0055                               v23 = load.i64 notrap aligned v22
+;; @0055                               v23 = load.i64 notrap aligned region1 v22
 ;;                                     v58 = iconst.i64 1
 ;; @0055                               v24 = iadd v23, v58  ; v58 = 1
 ;; @0055                               v25 = uextend.i64 v2
@@ -68,7 +69,7 @@
 ;; @0055                               v27 = iadd v26, v25
 ;; @0055                               v28 = iconst.i64 8
 ;; @0055                               v29 = iadd v27, v28  ; v28 = 8
-;; @0055                               store notrap aligned v24, v29
+;; @0055                               store notrap aligned region1 v24, v29
 ;; @0055                               jump block3
 ;;
 ;;                                 block3:
@@ -88,7 +89,7 @@
 ;; @0055                               v36 = iadd v35, v34
 ;; @0055                               v37 = iconst.i64 8
 ;; @0055                               v38 = iadd v36, v37  ; v37 = 8
-;; @0055                               v39 = load.i64 notrap aligned v38
+;; @0055                               v39 = load.i64 notrap aligned region1 v38
 ;;                                     v51 = iconst.i64 -1
 ;; @0055                               v40 = iadd v39, v51  ; v51 = -1
 ;;                                     v50 = iconst.i64 0
@@ -106,7 +107,7 @@
 ;; @0055                               v45 = iadd v44, v43
 ;; @0055                               v46 = iconst.i64 8
 ;; @0055                               v47 = iadd v45, v46  ; v46 = 8
-;; @0055                               store.i64 notrap aligned v40, v47
+;; @0055                               store.i64 notrap aligned region1 v40, v47
 ;; @0055                               jump block7
 ;;
 ;;                                 block7:
@@ -117,7 +118,8 @@
 ;; }
 ;;
 ;; function u0:1(i64 vmctx, i64, i32, i32) tail {
-;;     region0 = 1 "table"
+;;     region0 = 1342177280 "DefinedTable(StaticModuleIndex(0), DefinedTableIndex(0))"
+;;     region1 = 2147483648 "GcHeap"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24
@@ -158,7 +160,7 @@
 ;; @005e                               v20 = iadd v19, v18
 ;; @005e                               v21 = iconst.i64 8
 ;; @005e                               v22 = iadd v20, v21  ; v21 = 8
-;; @005e                               v23 = load.i64 notrap aligned v22
+;; @005e                               v23 = load.i64 notrap aligned region1 v22
 ;;                                     v58 = iconst.i64 1
 ;; @005e                               v24 = iadd v23, v58  ; v58 = 1
 ;; @005e                               v25 = uextend.i64 v3
@@ -167,7 +169,7 @@
 ;; @005e                               v27 = iadd v26, v25
 ;; @005e                               v28 = iconst.i64 8
 ;; @005e                               v29 = iadd v27, v28  ; v28 = 8
-;; @005e                               store notrap aligned v24, v29
+;; @005e                               store notrap aligned region1 v24, v29
 ;; @005e                               jump block3
 ;;
 ;;                                 block3:
@@ -187,7 +189,7 @@
 ;; @005e                               v36 = iadd v35, v34
 ;; @005e                               v37 = iconst.i64 8
 ;; @005e                               v38 = iadd v36, v37  ; v37 = 8
-;; @005e                               v39 = load.i64 notrap aligned v38
+;; @005e                               v39 = load.i64 notrap aligned region1 v38
 ;;                                     v51 = iconst.i64 -1
 ;; @005e                               v40 = iadd v39, v51  ; v51 = -1
 ;;                                     v50 = iconst.i64 0
@@ -205,7 +207,7 @@
 ;; @005e                               v45 = iadd v44, v43
 ;; @005e                               v46 = iconst.i64 8
 ;; @005e                               v47 = iadd v45, v46  ; v46 = 8
-;; @005e                               store.i64 notrap aligned v40, v47
+;; @005e                               store.i64 notrap aligned region1 v40, v47
 ;; @005e                               jump block7
 ;;
 ;;                                 block7:

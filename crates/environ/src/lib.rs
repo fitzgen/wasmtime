@@ -24,6 +24,7 @@ mod address_map;
 mod frame_table;
 #[macro_use]
 mod builtin;
+mod alias_region_key;
 mod demangling;
 mod ext;
 mod gc;
@@ -46,6 +47,7 @@ mod wasm_error;
 
 pub use self::ext::*;
 pub use crate::address_map::*;
+pub use crate::alias_region_key::*;
 pub use crate::builtin::*;
 pub use crate::demangling::*;
 pub use crate::frame_table::*;

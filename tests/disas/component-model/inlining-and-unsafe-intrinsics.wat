@@ -43,7 +43,8 @@
 )
 
 ;; function u0:0(i64 vmctx, i64) tail {
-;;     region0 = 2 "vmctx"
+;;     region0 = 16 "VMContext+0x10"
+;;     region1 = 268435560 "VMStoreContext+0x68"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24
@@ -68,7 +69,7 @@
 ;;                                 block4:
 ;; @0153                               v4 = load.i64 notrap aligned readonly can_move v0+64
 ;;                                     v17 = load.i64 notrap aligned readonly can_move region0 v4+16
-;;                                     v18 = load.i64 notrap aligned readonly can_move region0 v17+104
+;;                                     v18 = load.i64 notrap aligned readonly can_move region1 v17+104
 ;;                                     v20 = load.i8 notrap aligned v18
 ;;                                     jump block5
 ;;
