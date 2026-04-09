@@ -1724,7 +1724,8 @@ impl ComponentCompiler for Compiler {
                 let pointer_type = self.isa.pointer_type();
 
                 // Load the `*mut VMStoreContext` out of our vmctx.
-                let vmctx_key = wasmtime_environ::AliasRegionKey::VMContext {
+                let vmctx_key = wasmtime_environ::AliasRegionKey::Vmctx {
+                    ty: wasmtime_environ::VmctxType::VMContext,
                     offset: c.offsets.vm_store_context(),
                 };
                 let vmctx_region = c
@@ -1736,7 +1737,8 @@ impl ComponentCompiler for Compiler {
                         user_id: vmctx_key.into_raw(),
                         description: format!("{vmctx_key:?}").into(),
                     });
-                let store_ctx_key = wasmtime_environ::AliasRegionKey::VMStoreContext {
+                let store_ctx_key = wasmtime_environ::AliasRegionKey::Vmctx {
+                    ty: wasmtime_environ::VmctxType::VMStoreContext,
                     offset: u32::from(c.offsets.ptr.vmstore_context_store_data()),
                 };
                 let store_ctx_region =

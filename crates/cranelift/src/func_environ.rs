@@ -378,9 +378,10 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
     pub(crate) fn vmctx_alias_region(
         &mut self,
         func: &mut Function,
+        ty: wasmtime_environ::VmctxType,
         offset: u32,
     ) -> ir::AliasRegion {
-        self.alias_region(func, wasmtime_environ::AliasRegionKey::VMContext { offset })
+        self.alias_region(func, wasmtime_environ::AliasRegionKey::Vmctx { ty, offset })
     }
 
     fn get_table_copy_func(

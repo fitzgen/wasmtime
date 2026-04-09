@@ -14,10 +14,10 @@
   (global (export "funcref-local") funcref (ref.func $local)))
 
 ;; function u0:0(i64 vmctx, i64) -> i32, i32, i64, i64 tail {
-;;     region0 = 2147483648 "GcHeap"
+;;     region0 = 1879048192 "GcHeap"
 ;;     region1 = 32 "VMContext+0x20"
-;;     region2 = 1879048194 "DefinedGlobal(StaticModuleIndex(0), DefinedGlobalIndex(2))"
-;;     region3 = 1879048195 "DefinedGlobal(StaticModuleIndex(0), DefinedGlobalIndex(3))"
+;;     region2 = 1610612738 "DefinedGlobal(StaticModuleIndex(0), DefinedGlobalIndex(2))"
+;;     region3 = 1610612739 "DefinedGlobal(StaticModuleIndex(0), DefinedGlobalIndex(3))"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24

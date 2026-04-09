@@ -17,8 +17,8 @@
     local.get 1
     table.set 0))
 ;; function u0:0(i64 vmctx, i64, i32) tail {
-;;     region0 = 1342177280 "DefinedTable(StaticModuleIndex(0), DefinedTableIndex(0))"
-;;     region1 = 2147483648 "GcHeap"
+;;     region0 = 1073741824 "DefinedTable(StaticModuleIndex(0), DefinedTableIndex(0))"
+;;     region1 = 1879048192 "GcHeap"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24
@@ -116,8 +116,8 @@
 ;; }
 ;;
 ;; function u0:1(i64 vmctx, i64, i32, i32) tail {
-;;     region0 = 1342177280 "DefinedTable(StaticModuleIndex(0), DefinedTableIndex(0))"
-;;     region1 = 2147483648 "GcHeap"
+;;     region0 = 1073741824 "DefinedTable(StaticModuleIndex(0), DefinedTableIndex(0))"
+;;     region1 = 1879048192 "GcHeap"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24

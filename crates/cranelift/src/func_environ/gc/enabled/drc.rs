@@ -150,7 +150,11 @@ impl DrcCompiler {
     ) -> ir::Value {
         let ptr_ty = func_env.pointer_type();
         let gc_heap_data_offset = u32::from(func_env.offsets.ptr.vmctx_gc_heap_data());
-        let vmctx_region = func_env.vmctx_alias_region(&mut builder.func, gc_heap_data_offset);
+        let vmctx_region = func_env.vmctx_alias_region(
+            &mut builder.func,
+            wasmtime_environ::VmctxType::VMContext,
+            gc_heap_data_offset,
+        );
         let vmctx = func_env.vmctx(&mut builder.func);
         let vmctx = builder.ins().global_value(ptr_ty, vmctx);
         builder.ins().load(

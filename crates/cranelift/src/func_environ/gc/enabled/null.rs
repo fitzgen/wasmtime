@@ -71,7 +71,11 @@ impl NullCompiler {
         // not a raw pointer).
         let pointer_type = func_env.pointer_type();
         let gc_heap_data_offset = u32::from(func_env.offsets.ptr.vmctx_gc_heap_data());
-        let vmctx_region = func_env.vmctx_alias_region(&mut builder.func, gc_heap_data_offset);
+        let vmctx_region = func_env.vmctx_alias_region(
+            &mut builder.func,
+            wasmtime_environ::VmctxType::VMContext,
+            gc_heap_data_offset,
+        );
         let vmctx = func_env.vmctx_val(&mut builder.cursor());
         let ptr_to_next = builder.ins().load(
             pointer_type,

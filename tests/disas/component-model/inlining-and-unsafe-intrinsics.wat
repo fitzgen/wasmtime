@@ -44,7 +44,7 @@
 
 ;; function u0:0(i64 vmctx, i64) tail {
 ;;     region0 = 16 "VMContext+0x10"
-;;     region1 = 268435560 "VMStoreContext+0x68"
+;;     region1 = 8388712 "VMStoreContext+0x68"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24

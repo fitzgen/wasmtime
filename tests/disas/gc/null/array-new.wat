@@ -11,7 +11,7 @@
 )
 ;; function u0:0(i64 vmctx, i64, i64, i32) -> i32 tail {
 ;;     region0 = 32 "VMContext+0x20"
-;;     region1 = 2147483648 "GcHeap"
+;;     region1 = 1879048192 "GcHeap"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24
