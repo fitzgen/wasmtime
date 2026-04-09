@@ -43,6 +43,7 @@
 )
 
 ;; function u0:0(i64 vmctx, i64) tail {
+;;     region0 = 2 "vmctx"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24
@@ -56,12 +57,37 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64):
-;; @0153                               v5 = load.i64 notrap aligned readonly can_move vmctx v0+8
-;; @0153                               v6 = load.i64 notrap aligned readonly can_move vmctx v5+104
-;; @0155                               v9 = load.i8 notrap aligned v6
-;;                                     v22 = iconst.i8 1
-;;                                     v23 = iadd v9, v22  ; v22 = 1
-;; @0160                               store notrap aligned v23, v6
+;; @0153                               jump block2
+;;
+;;                                 block2:
+;;                                     jump block3
+;;
+;;                                 block3:
+;; @0155                               jump block4
+;;
+;;                                 block4:
+;; @0153                               v4 = load.i64 notrap aligned readonly can_move v0+64
+;;                                     v17 = load.i64 notrap aligned readonly can_move region0 v4+16
+;;                                     v18 = load.i64 notrap aligned readonly can_move region0 v17+104
+;;                                     v20 = load.i8 notrap aligned v18
+;;                                     jump block5
+;;
+;;                                 block5:
+;; @0159                               jump block6
+;;
+;;                                 block6:
+;;                                     jump block7
+;;
+;;                                 block7:
+;; @0160                               jump block8
+;;
+;;                                 block8:
+;;                                     v28 = iconst.i8 1
+;;                                     v29 = iadd.i8 v20, v28  ; v28 = 1
+;;                                     store notrap aligned v29, v18
+;;                                     jump block9
+;;
+;;                                 block9:
 ;; @0162                               jump block1
 ;;
 ;;                                 block1:

@@ -3109,7 +3109,7 @@ mod tests {
         let expected = if cfg!(target_pointer_width = "32") && !cfg!(target_arch = "arm") {
             28
         } else {
-            32
+            40
         };
         assert_eq!(expected, core::mem::size_of::<Inst>());
     }

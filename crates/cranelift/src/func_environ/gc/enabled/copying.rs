@@ -33,7 +33,7 @@ impl CopyingCompiler {
         val: ir::Value,
     ) -> WasmResult<()> {
         // Data inside GC objects is always little endian.
-        let flags = ir::MemFlags::trusted().with_endianness(ir::Endianness::Little);
+        let flags = ir::MemFlagsData::trusted().with_endianness(ir::Endianness::Little);
 
         match ty {
             WasmStorageType::Val(WasmValType::Ref(r)) => match r.heap_type.top() {
@@ -111,7 +111,7 @@ impl GcCompiler for CopyingCompiler {
         let len = init.len(&mut builder.cursor());
         builder
             .ins()
-            .store(ir::MemFlags::trusted(), len, len_addr, 0);
+            .store(ir::MemFlagsData::trusted(), len, len_addr, 0);
 
         // Initialize elements.
         let len_to_elems_delta = builder.ins().iconst(ptr_ty, i64::from(len_to_elems_delta));
@@ -253,7 +253,7 @@ impl GcCompiler for CopyingCompiler {
         builder: &mut FunctionBuilder,
         ty: WasmRefType,
         src: ir::Value,
-        flags: ir::MemFlags,
+        flags: ir::MemFlagsData,
     ) -> WasmResult<ir::Value> {
         assert!(ty.is_vmgcref_type());
 
@@ -289,7 +289,7 @@ impl GcCompiler for CopyingCompiler {
         ty: WasmRefType,
         dst: ir::Value,
         new_val: ir::Value,
-        flags: ir::MemFlags,
+        flags: ir::MemFlagsData,
     ) -> WasmResult<()> {
         // No write barrier needed for the copying collector.
         unbarriered_store_gc_ref(builder, ty.heap_type, dst, new_val, flags)

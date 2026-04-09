@@ -7,9 +7,9 @@ use crate::ir::dynamic_type::{DynamicTypeData, DynamicTypes};
 use crate::ir::instructions::{CallInfo, InstructionData};
 use crate::ir::user_stack_maps::{UserStackMapEntry, UserStackMapEntryVec};
 use crate::ir::{
-    Block, BlockArg, BlockCall, ConstantData, ConstantPool, DynamicType, ExceptionTables,
-    ExtFuncData, FuncRef, Immediate, Inst, JumpTables, MemFlagsSet, RelSourceLoc, SigRef,
-    Signature, Type, Value, ValueLabelAssignments, ValueList, ValueListPool, types,
+    AliasRegionSet, Block, BlockArg, BlockCall, ConstantData, ConstantPool, DynamicType,
+    ExceptionTables, ExtFuncData, FuncRef, Immediate, Inst, JumpTables, MemFlagsSet, RelSourceLoc,
+    SigRef, Signature, Type, Value, ValueLabelAssignments, ValueList, ValueListPool, types,
 };
 use crate::packed_option::ReservedValue;
 use crate::write::write_operands;
@@ -167,6 +167,9 @@ pub struct DataFlowGraph {
 
     /// Memory operation flags used in this function.
     pub mem_flags: MemFlagsSet,
+
+    /// Alias regions used in this function.
+    pub alias_regions: AliasRegionSet,
 }
 
 impl DataFlowGraph {
@@ -188,6 +191,7 @@ impl DataFlowGraph {
             jump_tables: JumpTables::new(),
             exception_tables: ExceptionTables::new(),
             mem_flags: MemFlagsSet::new(),
+            alias_regions: AliasRegionSet::new(),
         }
     }
 
@@ -207,6 +211,7 @@ impl DataFlowGraph {
         self.immediates.clear();
         self.jump_tables.clear();
         self.mem_flags.clear();
+        self.alias_regions.clear();
     }
 
     /// Get the total number of instructions created in this function, whether they are currently

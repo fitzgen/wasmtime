@@ -229,6 +229,12 @@ pub struct FuncEnvironment<'module_environment> {
     /// nonlinear control flow). This is useful in cases where we need
     /// to e.g. record the return-address of a callsite for debuginfo.
     pub(crate) next_srcloc: ir::SourceLoc,
+
+    /// Cached alias regions for alias analysis.
+    heap_alias_region: Option<ir::AliasRegion>,
+    table_alias_region: Option<ir::AliasRegion>,
+    #[allow(dead_code)]
+    vmctx_alias_region: Option<ir::AliasRegion>,
 }
 
 impl<'module_environment> FuncEnvironment<'module_environment> {
@@ -291,6 +297,9 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
             state_slot: None,
             next_srcloc: ir::SourceLoc::default(),
             wasm_module_offset: translation.wasm_module_offset,
+            heap_alias_region: None,
+            table_alias_region: None,
+            vmctx_alias_region: None,
         }
     }
 
@@ -303,6 +312,34 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
             let vmctx = func.create_global_value(ir::GlobalValueData::VMContext);
             self.vmctx = Some(vmctx);
             vmctx
+        })
+    }
+
+    pub(crate) fn get_heap_alias_region(&mut self, func: &mut Function) -> ir::AliasRegion {
+        *self.heap_alias_region.get_or_insert_with(|| {
+            func.dfg.alias_regions.insert(ir::AliasRegionData {
+                user_id: 0,
+                description: "heap".into(),
+            })
+        })
+    }
+
+    pub(crate) fn get_table_alias_region(&mut self, func: &mut Function) -> ir::AliasRegion {
+        *self.table_alias_region.get_or_insert_with(|| {
+            func.dfg.alias_regions.insert(ir::AliasRegionData {
+                user_id: 1,
+                description: "table".into(),
+            })
+        })
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn get_vmctx_alias_region(&mut self, func: &mut Function) -> ir::AliasRegion {
+        *self.vmctx_alias_region.get_or_insert_with(|| {
+            func.dfg.alias_regions.insert(ir::AliasRegionData {
+                user_id: 2,
+                description: "vmctx".into(),
+            })
         })
     }
 
@@ -3073,7 +3110,8 @@ impl FuncEnvironment<'_> {
                     flags.set_endianness(ir::Endianness::Little);
                 }
                 // Put globals in the "table" abstract heap category as well.
-                flags.set_alias_region(Some(ir::AliasRegion::Table));
+                let region = self.get_table_alias_region(builder.func);
+                flags.set_alias_region(Some(region));
                 Ok(builder.ins().load(ty, flags, addr, offset))
             }
             GlobalVariable::Custom => {
@@ -3124,7 +3162,8 @@ impl FuncEnvironment<'_> {
                     flags.set_endianness(ir::Endianness::Little);
                 }
                 // Put globals in the "table" abstract heap category as well.
-                flags.set_alias_region(Some(ir::AliasRegion::Table));
+                let region = self.get_table_alias_region(builder.func);
+                flags.set_alias_region(Some(region));
                 debug_assert_eq!(ty, builder.func.dfg.value_type(val));
                 builder.ins().store(flags, val, addr, offset);
                 self.update_global(builder, global_index, val);

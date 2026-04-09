@@ -330,6 +330,21 @@ impl Context {
         }
     }
 
+    // Allocate an alias region.
+    fn add_alias_region(
+        &mut self,
+        ar: ir::AliasRegion,
+        data: ir::AliasRegionData,
+        loc: Location,
+    ) -> ParseResult<()> {
+        // Ensure regions are defined in order (region0, region1, ...).
+        if self.function.dfg.alias_regions.len() != ar.index() {
+            return err!(loc, "duplicate alias region {}", ar);
+        }
+        self.function.dfg.alias_regions.push(data);
+        Ok(())
+    }
+
     // Allocate a new signature.
     fn add_sig(
         &mut self,
@@ -886,13 +901,24 @@ impl<'a> Parser<'a> {
     // Match and a consume a possibly empty sequence of memory operation flags.
     fn optional_memflags(&mut self) -> ParseResult<MemFlagsData> {
         let mut flags = MemFlagsData::new();
-        while let Some(Token::Identifier(text)) = self.token() {
-            match flags.set_by_name(text) {
-                Ok(true) => {
+        loop {
+            match self.token() {
+                Some(Token::Identifier(text)) => match flags.set_by_name(text) {
+                    Ok(true) => {
+                        self.consume();
+                    }
+                    Ok(false) => break,
+                    Err(msg) => return err!(self.loc, msg),
+                },
+                Some(Token::AliasRegion(n)) => {
+                    if flags.alias_region().is_some() {
+                        return err!(self.loc, "cannot set more than one alias region");
+                    }
+                    let region = ir::AliasRegion::new(n as usize);
+                    flags.set_alias_region(Some(region));
                     self.consume();
                 }
-                Ok(false) => break,
-                Err(msg) => return err!(self.loc, msg),
+                _ => break,
             }
         }
         Ok(flags)
@@ -1488,6 +1514,11 @@ impl<'a> Parser<'a> {
                     self.parse_stack_limit_decl()
                         .and_then(|gv| ctx.add_stack_limit(gv, self.loc))
                 }
+                Some(Token::AliasRegion(..)) => {
+                    self.start_gathering_comments();
+                    self.parse_alias_region_decl()
+                        .and_then(|(ar, dat)| ctx.add_alias_region(ar, dat, self.loc))
+                }
                 // More to come..
                 _ => return Ok(()),
             }?;
@@ -1904,6 +1935,44 @@ impl<'a> Parser<'a> {
         self.claim_gathered_comments(name);
 
         Ok((name, data))
+    }
+
+    // Parse an alias region decl
+    //
+    // alias-region-decl ::= * AliasRegion(region) "=" Integer String
+    fn parse_alias_region_decl(&mut self) -> ParseResult<(ir::AliasRegion, ir::AliasRegionData)> {
+        let ar_num = match self.token() {
+            Some(Token::AliasRegion(n)) => n,
+            _ => return err!(self.loc, "expected alias region number"),
+        };
+        self.consume();
+        let ar = ir::AliasRegion::new(usize::try_from(ar_num).unwrap());
+
+        self.match_token(Token::Equal, "expected '=' in alias region decl")?;
+
+        let user_id = match self.token() {
+            Some(Token::Integer(s)) => u32::from_str_radix(s, 10)
+                .map_err(|_| self.error("expected integer user_id for alias region"))?,
+            _ => return err!(self.loc, "expected integer user_id for alias region"),
+        };
+        self.consume();
+
+        let description = match self.token() {
+            Some(Token::String(s)) => s.to_owned(),
+            _ => return err!(self.loc, "expected string description for alias region"),
+        };
+        self.consume();
+
+        let data = ir::AliasRegionData {
+            user_id,
+            description: std::borrow::Cow::Owned(description),
+        };
+
+        // Collect any trailing comments.
+        self.token();
+        self.claim_gathered_comments(ir::AliasRegion::new(usize::try_from(ar_num).unwrap()));
+
+        Ok((ar, data))
     }
 
     // Parse a stack limit decl

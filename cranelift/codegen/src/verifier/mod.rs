@@ -389,7 +389,7 @@ impl<'a> Verifier<'a> {
                         }
                     }
                 }
-                ir::GlobalValueData::Load { base, .. } => {
+                ir::GlobalValueData::Load { base, flags, .. } => {
                     if let Some(isa) = self.isa {
                         let base_type = self.func.global_values[base].global_type(isa);
                         let pointer_type = isa.pointer_type();
@@ -402,12 +402,36 @@ impl<'a> Verifier<'a> {
                             ));
                         }
                     }
+                    let flags_data = self.func.dfg.mem_flags[flags];
+                    if let Some(region) = flags_data.alias_region() {
+                        if !self.func.dfg.alias_regions.is_valid(region) {
+                            errors.report((gv, format!("undefined alias region {region}")));
+                        }
+                    }
                 }
                 _ => {}
             }
         }
 
         // Invalid global values shouldn't stop us from verifying the rest of the function
+        Ok(())
+    }
+
+    fn verify_alias_regions(&self, errors: &mut VerifierErrors) -> VerifierStepResult {
+        let mut seen_user_ids = crate::HashMap::new();
+        for (ar, ar_data) in self.func.dfg.alias_regions.iter() {
+            if let Some(&prev) = seen_user_ids.get(&ar_data.user_id) {
+                errors.report((
+                    ar,
+                    format!(
+                        "duplicate alias region user_id {}: {} and {}",
+                        ar_data.user_id, prev, ar
+                    ),
+                ));
+            } else {
+                seen_user_ids.insert(ar_data.user_id, ar);
+            }
+        }
         Ok(())
     }
 
@@ -519,6 +543,20 @@ impl<'a> Verifier<'a> {
 
         for &res in self.func.dfg.inst_results(inst) {
             self.verify_inst_result(inst, res, errors)?;
+        }
+
+        // Verify alias region references in memflags.
+        if let Some(flags) = self.func.dfg.insts[inst].memflags() {
+            let flags_data = self.func.dfg.mem_flags[flags];
+            if let Some(region) = flags_data.alias_region() {
+                if !self.func.dfg.alias_regions.is_valid(region) {
+                    errors.report((
+                        inst,
+                        self.context(inst),
+                        format!("undefined alias region {region}"),
+                    ));
+                }
+            }
         }
 
         match self.func.dfg.insts[inst] {
@@ -2082,6 +2120,7 @@ impl<'a> Verifier<'a> {
 
     pub fn run(&self, errors: &mut VerifierErrors) -> VerifierStepResult {
         self.verify_global_values(errors)?;
+        self.verify_alias_regions(errors)?;
         self.typecheck_entry_block_params(errors)?;
         self.check_entry_not_cold(errors)?;
         self.typecheck_function_signature(errors)?;

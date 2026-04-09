@@ -3640,7 +3640,8 @@ fn prepare_addr(
     // state. This may allow alias analysis to merge redundant loads,
     // etc. when heap accesses occur interleaved with other (table,
     // vmctx, stack) accesses.
-    flags.set_alias_region(Some(ir::AliasRegion::Heap));
+    let region = environ.get_heap_alias_region(builder.func);
+    flags.set_alias_region(Some(region));
 
     Ok(Reachability::Reachable((flags, index, addr)))
 }

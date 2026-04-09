@@ -52,6 +52,16 @@ pub trait FuncWriter {
             self.write_entity_definition(w, func, ss.into(), slot)?;
         }
 
+        for (ar, ar_data) in func.dfg.alias_regions.iter() {
+            any = true;
+            self.write_entity_definition(
+                w,
+                func,
+                ar.into(),
+                &format_args!("{} \"{}\"", ar_data.user_id, ar_data.description),
+            )?;
+        }
+
         for (gv, gv_data) in &func.global_values {
             any = true;
             self.write_entity_definition(

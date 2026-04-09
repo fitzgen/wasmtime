@@ -1021,7 +1021,13 @@ impl<'a> ir::instructions::InstructionMapper for InliningInstRemapper<'a> {
     }
 
     fn map_mem_flags(&mut self, flags: ir::MemFlags) -> ir::MemFlags {
-        let flags_data = self.callee.dfg.mem_flags[flags];
+        let mut flags_data = self.callee.dfg.mem_flags[flags];
+        // Remap the alias region entity from callee to caller.
+        if let Some(callee_region) = flags_data.alias_region() {
+            let region_data = self.callee.dfg.alias_regions[callee_region].clone();
+            let caller_region = self.func.dfg.alias_regions.insert(region_data);
+            flags_data.set_alias_region(Some(caller_region));
+        }
         self.func.dfg.mem_flags.insert(flags_data)
     }
 }
@@ -1414,7 +1420,13 @@ fn create_global_values(func: &mut ir::Function, callee: &ir::Function) -> u32 {
         // the global value data, to avoid borrow conflicts.
         let remapped_flags = match gv {
             ir::GlobalValueData::Load { flags, .. } => {
-                let flags_data = callee.dfg.mem_flags[*flags];
+                let mut flags_data = callee.dfg.mem_flags[*flags];
+                // Remap alias region entity from callee to caller.
+                if let Some(callee_region) = flags_data.alias_region() {
+                    let region_data = callee.dfg.alias_regions[callee_region].clone();
+                    let caller_region = func.dfg.alias_regions.insert(region_data);
+                    flags_data.set_alias_region(Some(caller_region));
+                }
                 Some(func.dfg.mem_flags.insert(flags_data))
             }
             _ => None,
