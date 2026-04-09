@@ -1,7 +1,7 @@
 ;;! target = "x86_64"
 ;;! test = "optimize"
 ;;! filter = "wasm[2]--function"
-;;! flags = "-C inlining=inter-module"
+;;! flags = "-C inlining=y"
 
 (component
   (core module $A
@@ -35,6 +35,8 @@
 )
 
 ;; function u2:0(i64 vmctx, i64) -> i32 tail {
+;;     region0 = 64 "VMContext+0x40"
+;;     region1 = 88 "VMContext+0x58"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24
@@ -61,8 +63,8 @@
 ;;                                     jump block4
 ;;
 ;;                                 block4:
-;; @00d4                               v4 = load.i64 notrap aligned readonly can_move v0+72
-;;                                     v10 = load.i64 notrap aligned readonly can_move v4+104
+;; @00d4                               v4 = load.i64 notrap aligned readonly can_move region0 v0+64
+;;                                     v10 = load.i64 notrap aligned readonly can_move region1 v4+88
 ;;                                     call fn2(v10, v10)
 ;;                                     jump block5
 ;;

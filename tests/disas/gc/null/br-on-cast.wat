@@ -18,16 +18,25 @@
 )
 ;; function u0:0(i64 vmctx, i64, i32) tail {
 ;;     ss0 = explicit_slot 4, align = 4
+;;     region0 = 40 "VMContext+0x28"
+;;     region1 = 8 "VMContext+0x8"
+;;     region2 = 8388640 "VMStoreContext+0x20"
+;;     region3 = 8388648 "VMStoreContext+0x28"
+;;     region4 = 1879048192 "GcHeap"
+;;     region5 = 64 "VMContext+0x40"
+;;     region6 = 48 "VMContext+0x30"
+;;     region7 = 88 "VMContext+0x58"
+;;     region8 = 72 "VMContext+0x48"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24
 ;;     gv3 = vmctx
-;;     gv4 = load.i64 notrap aligned readonly can_move gv3+8
-;;     gv5 = load.i64 notrap aligned readonly can_move gv4+32
-;;     gv6 = load.i64 notrap aligned gv4+40
+;;     gv4 = load.i64 notrap aligned readonly can_move region1 gv3+8
+;;     gv5 = load.i64 notrap aligned readonly can_move region2 gv4+32
+;;     gv6 = load.i64 notrap aligned region3 gv4+40
 ;;     sig0 = (i64 vmctx, i32, i32) -> i32 tail
 ;;     sig1 = (i64 vmctx, i64) tail
-;;     fn0 = colocated u805306368:36 sig0
+;;     fn0 = colocated u805306368:35 sig0
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32):
@@ -45,14 +54,14 @@
 ;; @002f                               brif v8, block5(v43), block4  ; v43 = 0
 ;;
 ;;                                 block4:
-;; @002f                               v36 = load.i64 notrap aligned readonly can_move v0+8
-;; @002f                               v14 = load.i64 notrap aligned readonly can_move v36+32
+;; @002f                               v36 = load.i64 notrap aligned readonly can_move region1 v0+8
+;; @002f                               v14 = load.i64 notrap aligned readonly can_move region2 v36+32
 ;; @002f                               v13 = uextend.i64 v2
 ;; @002f                               v15 = iadd v14, v13
 ;; @002f                               v16 = iconst.i64 4
 ;; @002f                               v17 = iadd v15, v16  ; v16 = 4
-;; @002f                               v18 = load.i32 notrap aligned readonly v17
-;; @002f                               v11 = load.i64 notrap aligned readonly can_move v0+40
+;; @002f                               v18 = load.i32 notrap aligned readonly region4 v17
+;; @002f                               v11 = load.i64 notrap aligned readonly can_move region0 v0+40
 ;; @002f                               v12 = load.i32 notrap aligned readonly can_move v11
 ;; @002f                               v19 = icmp eq v18, v12
 ;; @002f                               v20 = uextend.i32 v19
@@ -70,14 +79,14 @@
 ;; @002f                               brif v24, block2, block8
 ;;
 ;;                                 block8:
-;; @0035                               v27 = load.i64 notrap aligned readonly can_move v0+56
-;; @0035                               v26 = load.i64 notrap aligned readonly can_move v0+72
+;; @0035                               v27 = load.i64 notrap aligned readonly can_move region6 v0+48
+;; @0035                               v26 = load.i64 notrap aligned readonly can_move region5 v0+64
 ;; @0035                               call_indirect sig1, v27(v26, v0)
 ;; @0037                               return
 ;;
 ;;                                 block2:
-;; @0039                               v30 = load.i64 notrap aligned readonly can_move v0+88
-;; @0039                               v29 = load.i64 notrap aligned readonly can_move v0+104
+;; @0039                               v30 = load.i64 notrap aligned readonly can_move region8 v0+72
+;; @0039                               v29 = load.i64 notrap aligned readonly can_move region7 v0+88
 ;; @0039                               call_indirect sig1, v30(v29, v0)
 ;; @003b                               return
 ;; }

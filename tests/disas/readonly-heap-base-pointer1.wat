@@ -8,13 +8,15 @@
     (i32.load (local.get 0)))
 )
 ;; function u0:0(i64 vmctx, i64, i32) -> i32 tail {
-;;     region0 = 536870912 "DefinedMemory(StaticModuleIndex(0), DefinedMemoryIndex(0))"
+;;     region0 = 64 "VMContext+0x40"
+;;     region1 = 56 "VMContext+0x38"
+;;     region2 = 536870912 "DefinedMemory(StaticModuleIndex(0), DefinedMemoryIndex(0))"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24
 ;;     gv3 = vmctx
-;;     gv4 = load.i64 notrap aligned gv3+64
-;;     gv5 = load.i64 notrap aligned readonly can_move gv3+56
+;;     gv4 = load.i64 notrap aligned region0 gv3+64
+;;     gv5 = load.i64 notrap aligned readonly can_move region1 gv3+56
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32):
@@ -22,10 +24,10 @@
 ;; @0020                               v5 = iconst.i64 0x0001_fffc
 ;; @0020                               v6 = icmp ugt v4, v5  ; v5 = 0x0001_fffc
 ;; @0020                               v9 = iconst.i64 0
-;; @0020                               v7 = load.i64 notrap aligned readonly can_move v0+56
+;; @0020                               v7 = load.i64 notrap aligned readonly can_move region1 v0+56
 ;; @0020                               v8 = iadd v7, v4
 ;; @0020                               v10 = select_spectre_guard v6, v9, v8  ; v9 = 0
-;; @0020                               v11 = load.i32 little region0 v10
+;; @0020                               v11 = load.i32 little region2 v10
 ;; @0023                               jump block1
 ;;
 ;;                                 block1:

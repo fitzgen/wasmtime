@@ -10,25 +10,28 @@
   )
 )
 ;; function u0:0(i64 vmctx, i64, i32, i32, i64) tail {
-;;     region0 = 1879048192 "GcHeap"
+;;     region0 = 8 "VMContext+0x8"
+;;     region1 = 8388640 "VMStoreContext+0x20"
+;;     region2 = 8388648 "VMStoreContext+0x28"
+;;     region3 = 1879048192 "GcHeap"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24
 ;;     gv3 = vmctx
-;;     gv4 = load.i64 notrap aligned readonly can_move gv3+8
-;;     gv5 = load.i64 notrap aligned readonly can_move gv4+32
-;;     gv6 = load.i64 notrap aligned gv4+40
+;;     gv4 = load.i64 notrap aligned readonly can_move region0 gv3+8
+;;     gv5 = load.i64 notrap aligned readonly can_move region1 gv4+32
+;;     gv6 = load.i64 notrap aligned region2 gv4+40
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32, v3: i32, v4: i64):
 ;; @0024                               trapz v2, user15
-;; @0024                               v32 = load.i64 notrap aligned readonly can_move v0+8
-;; @0024                               v6 = load.i64 notrap aligned readonly can_move v32+32
+;; @0024                               v32 = load.i64 notrap aligned readonly can_move region0 v0+8
+;; @0024                               v6 = load.i64 notrap aligned readonly can_move region1 v32+32
 ;; @0024                               v5 = uextend.i64 v2
 ;; @0024                               v7 = iadd v6, v5
 ;; @0024                               v8 = iconst.i64 8
 ;; @0024                               v9 = iadd v7, v8  ; v8 = 8
-;; @0024                               v10 = load.i32 notrap aligned readonly region0 v9
+;; @0024                               v10 = load.i32 notrap aligned readonly region3 v9
 ;; @0024                               v11 = icmp ult v3, v10
 ;; @0024                               trapz v11, user16
 ;; @0024                               v13 = uextend.i64 v10
@@ -49,7 +52,7 @@
 ;; @0024                               v26 = isub v18, v21
 ;; @0024                               v27 = uextend.i64 v26
 ;; @0024                               v28 = isub v25, v27
-;; @0024                               store notrap aligned little region0 v4, v28
+;; @0024                               store notrap aligned little region3 v4, v28
 ;; @0027                               jump block1
 ;;
 ;;                                 block1:

@@ -20,6 +20,7 @@
 )
 
 ;; function u1:0(i64 vmctx, i64, i32) -> i32 tail {
+;;     region0 = 64 "VMContext+0x40"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24
@@ -37,7 +38,7 @@
 ;; @006f                               jump block2
 ;;
 ;;                                 block2:
-;; @006f                               v6 = load.i64 notrap aligned readonly can_move v0+72
+;; @006f                               v6 = load.i64 notrap aligned readonly can_move region0 v0+64
 ;;                                     v10 = iconst.i32 1
 ;;                                     v12 = call fn1(v6, v6, v10)  ; v10 = 1
 ;;                                     jump block4

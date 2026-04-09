@@ -17,27 +17,29 @@
 )
 
 ;; function u0:0(i64 vmctx, i64, i32) tail {
-;;     region0 = 536870912 "DefinedMemory(StaticModuleIndex(0), DefinedMemoryIndex(0))"
+;;     region0 = 64 "VMContext+0x40"
+;;     region1 = 56 "VMContext+0x38"
+;;     region2 = 536870912 "DefinedMemory(StaticModuleIndex(0), DefinedMemoryIndex(0))"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24
 ;;     gv3 = vmctx
-;;     gv4 = load.i64 notrap aligned gv3+64
-;;     gv5 = load.i64 notrap aligned readonly can_move gv3+56
+;;     gv4 = load.i64 notrap aligned region0 gv3+64
+;;     gv5 = load.i64 notrap aligned readonly can_move region1 gv3+56
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32):
 ;; @0036                               v3 = iconst.i32 48
 ;; @0038                               v4 = iconst.i32 0
 ;; @003a                               v5 = uextend.i64 v4  ; v4 = 0
-;; @003a                               v6 = load.i64 notrap aligned readonly can_move v0+56
+;; @003a                               v6 = load.i64 notrap aligned readonly can_move region1 v0+56
 ;; @003a                               v7 = iadd v6, v5
-;; @003a                               v8 = load.i8x16 little region0 v7
+;; @003a                               v8 = load.i8x16 little region2 v7
 ;; @003e                               v9 = iconst.i32 16
 ;; @0040                               v10 = uextend.i64 v9  ; v9 = 16
-;; @0040                               v11 = load.i64 notrap aligned readonly can_move v0+56
+;; @0040                               v11 = load.i64 notrap aligned readonly can_move region1 v0+56
 ;; @0040                               v12 = iadd v11, v10
-;; @0040                               v13 = load.i8x16 little region0 v12
+;; @0040                               v13 = load.i8x16 little region2 v12
 ;; @0046                               brif v2, block2, block4
 ;;
 ;;                                 block2:
@@ -46,9 +48,9 @@
 ;; @0048                               v18 = iadd v16, v17
 ;; @004b                               v19 = iconst.i32 32
 ;; @004d                               v20 = uextend.i64 v19  ; v19 = 32
-;; @004d                               v21 = load.i64 notrap aligned readonly can_move v0+56
+;; @004d                               v21 = load.i64 notrap aligned readonly can_move region1 v0+56
 ;; @004d                               v22 = iadd v21, v20
-;; @004d                               v23 = load.i8x16 little region0 v22
+;; @004d                               v23 = load.i8x16 little region2 v22
 ;; @0051                               v26 = bitcast.i8x16 little v18
 ;; @0051                               jump block3(v26, v23)
 ;;
@@ -58,9 +60,9 @@
 ;; @0052                               v29 = isub v27, v28
 ;; @0055                               v30 = iconst.i32 0
 ;; @0057                               v31 = uextend.i64 v30  ; v30 = 0
-;; @0057                               v32 = load.i64 notrap aligned readonly can_move v0+56
+;; @0057                               v32 = load.i64 notrap aligned readonly can_move region1 v0+56
 ;; @0057                               v33 = iadd v32, v31
-;; @0057                               v34 = load.i8x16 little region0 v33
+;; @0057                               v34 = load.i8x16 little region2 v33
 ;; @005b                               v35 = bitcast.i8x16 little v29
 ;; @005b                               jump block3(v35, v34)
 ;;
@@ -69,9 +71,9 @@
 ;; @005c                               v37 = bitcast.i16x8 little v15
 ;; @005c                               v38 = imul v36, v37
 ;; @005f                               v39 = uextend.i64 v3  ; v3 = 48
-;; @005f                               v40 = load.i64 notrap aligned readonly can_move v0+56
+;; @005f                               v40 = load.i64 notrap aligned readonly can_move region1 v0+56
 ;; @005f                               v41 = iadd v40, v39
-;; @005f                               store little region0 v38, v41
+;; @005f                               store little region2 v38, v41
 ;; @0063                               jump block1
 ;;
 ;;                                 block1:

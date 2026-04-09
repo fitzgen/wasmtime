@@ -127,28 +127,31 @@
 ;; }
 ;;
 ;; function u0:1(i64 vmctx, i64, i32, i32, i32, i32) -> i32 tail {
-;;     region0 = 1073741824 "DefinedTable(StaticModuleIndex(0), DefinedTableIndex(0))"
+;;     region0 = 48 "VMContext+0x30"
+;;     region1 = 1073741824 "DefinedTable(StaticModuleIndex(0), DefinedTableIndex(0))"
+;;     region2 = 16777224 "VMFuncRef+0x8"
+;;     region3 = 16777240 "VMFuncRef+0x18"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24
 ;;     gv3 = vmctx
-;;     gv4 = load.i64 notrap aligned readonly can_move gv3+48
+;;     gv4 = load.i64 notrap aligned readonly can_move region0 gv3+48
 ;;     sig0 = (i64 vmctx, i64, i32, i32, i32, i32) -> i32 tail
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32, v3: i32, v4: i32, v5: i32):
-;; @0048                               v12 = load.i64 notrap aligned readonly can_move v0+48
+;; @0048                               v12 = load.i64 notrap aligned readonly can_move region0 v0+48
 ;;                                     v48 = iconst.i64 8
 ;; @0048                               v14 = iadd v12, v48  ; v48 = 8
-;; @0048                               v17 = load.i64 user5 aligned region0 v14
-;; @004a                               v18 = load.i64 user15 aligned readonly v17+8
-;; @004a                               v19 = load.i64 notrap aligned readonly v17+24
+;; @0048                               v17 = load.i64 user5 aligned region1 v14
+;; @004a                               v18 = load.i64 user15 aligned readonly region2 v17+8
+;; @004a                               v19 = load.i64 notrap aligned readonly region3 v17+24
 ;; @004a                               v20 = call_indirect sig0, v18(v19, v0, v2, v3, v4, v5)
 ;;                                     v56 = iconst.i64 16
 ;; @005b                               v28 = iadd v12, v56  ; v56 = 16
-;; @005b                               v31 = load.i64 user5 aligned region0 v28
-;; @005d                               v32 = load.i64 user15 aligned readonly v31+8
-;; @005d                               v33 = load.i64 notrap aligned readonly v31+24
+;; @005b                               v31 = load.i64 user5 aligned region1 v28
+;; @005d                               v32 = load.i64 user15 aligned readonly region2 v31+8
+;; @005d                               v33 = load.i64 notrap aligned readonly region3 v31+24
 ;; @005d                               v34 = call_indirect sig0, v32(v33, v0, v2, v3, v4, v5)
 ;; @0066                               jump block1
 ;;
@@ -158,28 +161,31 @@
 ;; }
 ;;
 ;; function u0:2(i64 vmctx, i64, i32, i32, i32, i32) -> i32 tail {
-;;     region0 = 1073741824 "DefinedTable(StaticModuleIndex(0), DefinedTableIndex(0))"
+;;     region0 = 48 "VMContext+0x30"
+;;     region1 = 1073741824 "DefinedTable(StaticModuleIndex(0), DefinedTableIndex(0))"
+;;     region2 = 16777224 "VMFuncRef+0x8"
+;;     region3 = 16777240 "VMFuncRef+0x18"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24
 ;;     gv3 = vmctx
-;;     gv4 = load.i64 notrap aligned readonly can_move gv3+48
+;;     gv4 = load.i64 notrap aligned readonly can_move region0 gv3+48
 ;;     sig0 = (i64 vmctx, i64, i32, i32, i32, i32) -> i32 tail
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32, v3: i32, v4: i32, v5: i32):
-;; @0075                               v12 = load.i64 notrap aligned readonly can_move v0+48
+;; @0075                               v12 = load.i64 notrap aligned readonly can_move region0 v0+48
 ;;                                     v48 = iconst.i64 8
 ;; @0075                               v14 = iadd v12, v48  ; v48 = 8
-;; @0075                               v17 = load.i64 user5 aligned region0 v14
-;; @0075                               v18 = load.i64 user6 aligned readonly v17+8
-;; @0075                               v19 = load.i64 notrap aligned readonly v17+24
+;; @0075                               v17 = load.i64 user5 aligned region1 v14
+;; @0075                               v18 = load.i64 user6 aligned readonly region2 v17+8
+;; @0075                               v19 = load.i64 notrap aligned readonly region3 v17+24
 ;; @0075                               v20 = call_indirect sig0, v18(v19, v0, v2, v3, v4, v5)
 ;;                                     v56 = iconst.i64 16
 ;; @0087                               v28 = iadd v12, v56  ; v56 = 16
-;; @0087                               v31 = load.i64 user5 aligned region0 v28
-;; @0087                               v32 = load.i64 user6 aligned readonly v31+8
-;; @0087                               v33 = load.i64 notrap aligned readonly v31+24
+;; @0087                               v31 = load.i64 user5 aligned region1 v28
+;; @0087                               v32 = load.i64 user6 aligned readonly region2 v31+8
+;; @0087                               v33 = load.i64 notrap aligned readonly region3 v31+24
 ;; @0087                               v34 = call_indirect sig0, v32(v33, v0, v2, v3, v4, v5)
 ;; @0091                               jump block1
 ;;
@@ -190,7 +196,9 @@
 ;;
 ;; function u0:3(i64 vmctx, i64, i32, i32, i32, i32) -> i32 tail {
 ;;     region0 = 1610612736 "DefinedGlobal(StaticModuleIndex(0), DefinedGlobalIndex(0))"
-;;     region1 = 1610612737 "DefinedGlobal(StaticModuleIndex(0), DefinedGlobalIndex(1))"
+;;     region1 = 16777224 "VMFuncRef+0x8"
+;;     region2 = 16777240 "VMFuncRef+0x18"
+;;     region3 = 1610612737 "DefinedGlobal(StaticModuleIndex(0), DefinedGlobalIndex(1))"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24
@@ -200,12 +208,12 @@
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32, v3: i32, v4: i32, v5: i32):
 ;; @009e                               v9 = load.i64 notrap aligned region0 v0+64
-;; @00a0                               v10 = load.i64 user15 aligned readonly v9+8
-;; @00a0                               v11 = load.i64 notrap aligned readonly v9+24
+;; @00a0                               v10 = load.i64 user15 aligned readonly region1 v9+8
+;; @00a0                               v11 = load.i64 notrap aligned readonly region2 v9+24
 ;; @00a0                               v12 = call_indirect sig0, v10(v11, v0, v2, v3, v4, v5)
-;; @00af                               v15 = load.i64 notrap aligned region1 v0+80
-;; @00b1                               v16 = load.i64 user15 aligned readonly v15+8
-;; @00b1                               v17 = load.i64 notrap aligned readonly v15+24
+;; @00af                               v15 = load.i64 notrap aligned region3 v0+80
+;; @00b1                               v16 = load.i64 user15 aligned readonly region1 v15+8
+;; @00b1                               v17 = load.i64 notrap aligned readonly region2 v15+24
 ;; @00b1                               v18 = call_indirect sig0, v16(v17, v0, v2, v3, v4, v5)
 ;; @00ba                               jump block1
 ;;

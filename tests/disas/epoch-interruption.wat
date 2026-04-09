@@ -5,20 +5,23 @@
 (module (func (loop (br 0))))
 
 ;; function u0:0(i64 vmctx, i64) tail {
+;;     region0 = 24 "VMContext+0x18"
+;;     region1 = 8388616 "VMStoreContext+0x8"
+;;     region2 = 8 "VMContext+0x8"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24
 ;;     gv3 = vmctx
-;;     gv4 = load.i64 notrap aligned readonly can_move gv3+8
+;;     gv4 = load.i64 notrap aligned readonly can_move region2 gv3+8
 ;;     sig0 = (i64 vmctx) -> i64 tail
 ;;     fn0 = colocated u805306368:16 sig0
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64):
-;; @0016                               v3 = load.i64 notrap aligned v0+24
+;; @0016                               v3 = load.i64 notrap aligned region0 v0+24
 ;; @0016                               v4 = load.i64 notrap aligned v3
-;; @0016                               v5 = load.i64 notrap aligned readonly can_move v0+8
-;; @0016                               v6 = load.i64 notrap aligned v5+8
+;; @0016                               v5 = load.i64 notrap aligned readonly can_move region2 v0+8
+;; @0016                               v6 = load.i64 notrap aligned region1 v5+8
 ;; @0016                               v7 = icmp uge v4, v6
 ;; @0016                               brif v7, block3, block2(v6)
 ;;
@@ -35,7 +38,7 @@
 ;; @0017                               brif v13, block7, block6(v12)
 ;;
 ;;                                 block7 cold:
-;; @0017                               v15 = load.i64 notrap aligned v5+8
+;; @0017                               v15 = load.i64 notrap aligned region1 v5+8
 ;; @0017                               v16 = icmp.i64 uge v11, v15
 ;; @0017                               brif v16, block8, block6(v15)
 ;;

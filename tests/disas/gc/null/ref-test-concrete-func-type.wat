@@ -9,6 +9,8 @@
   )
 )
 ;; function u0:0(i64 vmctx, i64, i64) -> i32 tail {
+;;     region0 = 40 "VMContext+0x28"
+;;     region1 = 16777232 "VMFuncRef+0x10"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24
@@ -28,8 +30,8 @@
 ;; @0020                               jump block3
 ;;
 ;;                                 block3:
-;; @0020                               v10 = load.i32 notrap aligned readonly v2+16
-;; @0020                               v8 = load.i64 notrap aligned readonly can_move v0+40
+;; @0020                               v10 = load.i32 notrap aligned readonly region1 v2+16
+;; @0020                               v8 = load.i64 notrap aligned readonly can_move region0 v0+40
 ;; @0020                               v9 = load.i32 notrap aligned readonly can_move v8
 ;; @0020                               v11 = icmp eq v10, v9
 ;; @0020                               v12 = uextend.i32 v11

@@ -194,11 +194,11 @@ impl ABIMachineSpec for Riscv64MachineDeps {
     }
 
     fn gen_load_stack(mem: StackAMode, into_reg: Writable<Reg>, ty: Type) -> Inst {
-        Inst::gen_load(into_reg, mem.into(), ty, MemFlagsData::trusted())
+        Inst::gen_load(into_reg, mem.into(), ty, MemFlagsSet::TRUSTED)
     }
 
     fn gen_store_stack(mem: StackAMode, from_reg: Reg, ty: Type) -> Inst {
-        Inst::gen_store(mem.into(), from_reg, ty, MemFlagsData::trusted())
+        Inst::gen_store(mem.into(), from_reg, ty, MemFlagsSet::TRUSTED)
     }
 
     fn gen_move(to_reg: Writable<Reg>, from_reg: Reg, ty: Type) -> Inst {
@@ -290,12 +290,12 @@ impl ABIMachineSpec for Riscv64MachineDeps {
 
     fn gen_load_base_offset(into_reg: Writable<Reg>, base: Reg, offset: i32, ty: Type) -> Inst {
         let mem = AMode::RegOffset(base, offset as i64);
-        Inst::gen_load(into_reg, mem, ty, MemFlagsData::trusted())
+        Inst::gen_load(into_reg, mem, ty, MemFlagsSet::TRUSTED)
     }
 
     fn gen_store_base_offset(base: Reg, offset: i32, from_reg: Reg, ty: Type) -> Inst {
         let mem = AMode::RegOffset(base, offset as i64);
-        Inst::gen_store(mem, from_reg, ty, MemFlagsData::trusted())
+        Inst::gen_store(mem, from_reg, ty, MemFlagsSet::TRUSTED)
     }
 
     fn gen_sp_reg_adjust(amount: i32) -> SmallInstVec<Inst> {
@@ -344,13 +344,13 @@ impl ABIMachineSpec for Riscv64MachineDeps {
                 AMode::SPOffset(8),
                 link_reg(),
                 I64,
-                MemFlagsData::trusted(),
+                MemFlagsSet::TRUSTED,
             ));
             insts.push(Inst::gen_store(
                 AMode::SPOffset(0),
                 fp_reg(),
                 I64,
-                MemFlagsData::trusted(),
+                MemFlagsSet::TRUSTED,
             ));
 
             if flags.unwind_info() {
@@ -383,13 +383,13 @@ impl ABIMachineSpec for Riscv64MachineDeps {
                 writable_link_reg(),
                 AMode::SPOffset(8),
                 I64,
-                MemFlagsData::trusted(),
+                MemFlagsSet::TRUSTED,
             ));
             insts.push(Inst::gen_load(
                 writable_fp_reg(),
                 AMode::SPOffset(0),
                 I64,
-                MemFlagsData::trusted(),
+                MemFlagsSet::TRUSTED,
             ));
             insts.extend(Self::gen_sp_reg_adjust(16));
         }
@@ -446,19 +446,19 @@ impl ABIMachineSpec for Riscv64MachineDeps {
                     AMode::SPOffset(8),
                     link_reg(),
                     I64,
-                    MemFlagsData::trusted(),
+                    MemFlagsSet::TRUSTED,
                 ));
                 insts.push(Inst::gen_load(
                     writable_fp_reg(),
                     AMode::SPOffset(i64::from(incoming_args_diff)),
                     I64,
-                    MemFlagsData::trusted(),
+                    MemFlagsSet::TRUSTED,
                 ));
                 insts.push(Inst::gen_store(
                     AMode::SPOffset(0),
                     fp_reg(),
                     I64,
-                    MemFlagsData::trusted(),
+                    MemFlagsSet::TRUSTED,
                 ));
 
                 // Finally, sync the frame pointer with SP
@@ -501,7 +501,7 @@ impl ABIMachineSpec for Riscv64MachineDeps {
                     AMode::SPOffset(i64::from(stack_size - cur_offset - ty.bytes())),
                     Reg::from(reg.to_reg()),
                     ty,
-                    MemFlagsData::trusted(),
+                    MemFlagsSet::TRUSTED,
                 ));
 
                 if flags.unwind_info() {
@@ -544,7 +544,7 @@ impl ABIMachineSpec for Riscv64MachineDeps {
                 reg.map(Reg::from),
                 AMode::SPOffset(i64::from(stack_size - cur_offset - ty.bytes())),
                 ty,
-                MemFlagsData::trusted(),
+                MemFlagsSet::TRUSTED,
             ));
             cur_offset += ty.bytes();
         }
@@ -1115,7 +1115,7 @@ impl Riscv64MachineDeps {
                 AMode::SPOffset(0),
                 zero_reg(),
                 I32,
-                MemFlagsData::trusted(),
+                MemFlagsSet::TRUSTED,
             ));
         }
 

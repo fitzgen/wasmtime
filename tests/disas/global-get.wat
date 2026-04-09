@@ -31,17 +31,18 @@
 )
 
 ;; function u0:0(i64 vmctx, i64) -> i32 tail {
-;;     region0 = 1342177280 "ImportedGlobal"
+;;     region0 = 48 "VMContext+0x30"
+;;     region1 = 1342177280 "ImportedGlobal"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24
 ;;     gv3 = vmctx
-;;     gv4 = load.i64 notrap aligned readonly can_move gv3+48
+;;     gv4 = load.i64 notrap aligned readonly can_move region0 gv3+48
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64):
-;; @003d                               v3 = load.i64 notrap aligned readonly can_move v0+48
-;; @003d                               v4 = load.i32 notrap aligned region0 v3
+;; @003d                               v3 = load.i64 notrap aligned readonly can_move region0 v0+48
+;; @003d                               v4 = load.i32 notrap aligned region1 v3
 ;; @003f                               jump block1
 ;;
 ;;                                 block1:
@@ -49,17 +50,18 @@
 ;; }
 ;;
 ;; function u0:1(i64 vmctx, i64) -> i32 tail {
-;;     region0 = 1342177280 "ImportedGlobal"
+;;     region0 = 72 "VMContext+0x48"
+;;     region1 = 1342177280 "ImportedGlobal"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24
 ;;     gv3 = vmctx
-;;     gv4 = load.i64 notrap aligned readonly can_move gv3+72
+;;     gv4 = load.i64 notrap aligned readonly can_move region0 gv3+72
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64):
-;; @0042                               v3 = load.i64 notrap aligned readonly can_move v0+72
-;; @0042                               v4 = load.i32 notrap aligned region0 v3
+;; @0042                               v3 = load.i64 notrap aligned readonly can_move region0 v0+72
+;; @0042                               v4 = load.i32 notrap aligned region1 v3
 ;; @0044                               jump block1
 ;;
 ;;                                 block1:

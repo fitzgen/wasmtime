@@ -11,13 +11,15 @@
 )
 ;; function u0:0(i64 vmctx, i64, i64) -> i32 tail {
 ;;     ss0 = explicit_slot 4, align = 4
-;;     region0 = 1879048192 "GcHeap"
+;;     region0 = 8 "VMContext+0x8"
+;;     region1 = 8388640 "VMStoreContext+0x20"
+;;     region2 = 1879048192 "GcHeap"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24
 ;;     gv3 = vmctx
-;;     gv4 = load.i64 notrap aligned readonly can_move gv3+8
-;;     gv5 = load.i64 notrap aligned readonly can_move gv4+32
+;;     gv4 = load.i64 notrap aligned readonly can_move region0 gv3+8
+;;     gv5 = load.i64 notrap aligned readonly can_move region1 gv4+32
 ;;     sig0 = (i64 vmctx, i32, i32, i32, i32) -> i32 tail
 ;;     sig1 = (i64 vmctx, i64) -> i64 tail
 ;;     fn0 = colocated u805306368:27 sig0
@@ -34,13 +36,13 @@
 ;;                                     store notrap v9, v24
 ;; @0020                               v15 = call fn1(v0, v2), stack_map=[i32 @ ss0+0]
 ;; @0020                               v16 = ireduce.i32 v15
-;; @0020                               v22 = load.i64 notrap aligned readonly can_move v0+8
-;; @0020                               v10 = load.i64 notrap aligned readonly can_move v22+32
+;; @0020                               v22 = load.i64 notrap aligned readonly can_move region0 v0+8
+;; @0020                               v10 = load.i64 notrap aligned readonly can_move region1 v22+32
 ;; @0020                               v11 = uextend.i64 v9
 ;; @0020                               v12 = iadd v10, v11
 ;;                                     v20 = iconst.i64 24
 ;; @0020                               v13 = iadd v12, v20  ; v20 = 24
-;; @0020                               store notrap aligned little region0 v16, v13
+;; @0020                               store notrap aligned little region2 v16, v13
 ;;                                     v17 = load.i32 notrap v24
 ;; @0023                               jump block1
 ;;

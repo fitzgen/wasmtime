@@ -9,13 +9,18 @@
   )
 )
 ;; function u0:0(i64 vmctx, i64, i32) -> i32 tail {
+;;     region0 = 40 "VMContext+0x28"
+;;     region1 = 8 "VMContext+0x8"
+;;     region2 = 8388640 "VMStoreContext+0x20"
+;;     region3 = 8388648 "VMStoreContext+0x28"
+;;     region4 = 1879048192 "GcHeap"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24
 ;;     gv3 = vmctx
-;;     gv4 = load.i64 notrap aligned readonly can_move gv3+8
-;;     gv5 = load.i64 notrap aligned readonly can_move gv4+32
-;;     gv6 = load.i64 notrap aligned gv4+40
+;;     gv4 = load.i64 notrap aligned readonly can_move region1 gv3+8
+;;     gv5 = load.i64 notrap aligned readonly can_move region2 gv4+32
+;;     gv6 = load.i64 notrap aligned region3 gv4+40
 ;;     sig0 = (i64 vmctx, i32, i32) -> i32 tail
 ;;     fn0 = colocated u805306368:36 sig0
 ;;     stack_limit = gv2
@@ -33,14 +38,14 @@
 ;; @001d                               brif v8, block4(v28), block3  ; v28 = 0
 ;;
 ;;                                 block3:
-;; @001d                               v25 = load.i64 notrap aligned readonly can_move v0+8
-;; @001d                               v14 = load.i64 notrap aligned readonly can_move v25+32
+;; @001d                               v25 = load.i64 notrap aligned readonly can_move region1 v0+8
+;; @001d                               v14 = load.i64 notrap aligned readonly can_move region2 v25+32
 ;; @001d                               v13 = uextend.i64 v2
 ;; @001d                               v15 = iadd v14, v13
 ;; @001d                               v16 = iconst.i64 4
 ;; @001d                               v17 = iadd v15, v16  ; v16 = 4
-;; @001d                               v18 = load.i32 notrap aligned readonly v17
-;; @001d                               v11 = load.i64 notrap aligned readonly can_move v0+40
+;; @001d                               v18 = load.i32 notrap aligned readonly region4 v17
+;; @001d                               v11 = load.i64 notrap aligned readonly can_move region0 v0+40
 ;; @001d                               v12 = load.i32 notrap aligned readonly can_move v11
 ;; @001d                               v19 = icmp eq v18, v12
 ;; @001d                               v20 = uextend.i32 v19

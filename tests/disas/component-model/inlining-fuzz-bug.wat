@@ -38,6 +38,8 @@
 )
 
 ;; function u2:0(i64 vmctx, i64) -> i32 tail {
+;;     region0 = 64 "VMContext+0x40"
+;;     region1 = 88 "VMContext+0x58"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24

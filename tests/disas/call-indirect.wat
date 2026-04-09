@@ -8,30 +8,36 @@
 )
 
 ;; function u0:0(i64 vmctx, i64, i32, i32) -> i32 tail {
-;;     region0 = 1073741824 "DefinedTable(StaticModuleIndex(0), DefinedTableIndex(0))"
+;;     region0 = 48 "VMContext+0x30"
+;;     region1 = 56 "VMContext+0x38"
+;;     region2 = 1073741824 "DefinedTable(StaticModuleIndex(0), DefinedTableIndex(0))"
+;;     region3 = 40 "VMContext+0x28"
+;;     region4 = 16777232 "VMFuncRef+0x10"
+;;     region5 = 16777224 "VMFuncRef+0x8"
+;;     region6 = 16777240 "VMFuncRef+0x18"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24
 ;;     gv3 = vmctx
-;;     gv4 = load.i64 notrap aligned gv3+48
-;;     gv5 = load.i64 notrap aligned gv3+56
+;;     gv4 = load.i64 notrap aligned region0 gv3+48
+;;     gv5 = load.i64 notrap aligned region1 gv3+56
 ;;     sig0 = (i64 vmctx, i64, i32) -> i32 tail
 ;;     sig1 = (i64 vmctx, i32, i64) -> i64 tail
 ;;     fn0 = colocated u805306368:9 sig1
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32, v3: i32):
-;; @0035                               v5 = load.i64 notrap aligned v0+56
+;; @0035                               v5 = load.i64 notrap aligned region1 v0+56
 ;; @0035                               v6 = ireduce.i32 v5
 ;; @0035                               v7 = icmp uge v3, v6
 ;; @0035                               v8 = uextend.i64 v3
-;; @0035                               v9 = load.i64 notrap aligned v0+48
+;; @0035                               v9 = load.i64 notrap aligned region0 v0+48
 ;;                                     v30 = iconst.i64 3
 ;; @0035                               v10 = ishl v8, v30  ; v30 = 3
 ;; @0035                               v11 = iadd v9, v10
 ;; @0035                               v12 = iconst.i64 0
 ;; @0035                               v13 = select_spectre_guard v7, v12, v11  ; v12 = 0
-;; @0035                               v14 = load.i64 user5 aligned region0 v13
+;; @0035                               v14 = load.i64 user5 aligned region2 v13
 ;;                                     v29 = iconst.i64 -2
 ;; @0035                               v15 = band v14, v29  ; v29 = -2
 ;; @0035                               brif v14, block3(v15), block2
@@ -43,13 +49,13 @@
 ;; @0035                               jump block3(v20)
 ;;
 ;;                                 block3(v16: i64):
-;; @0035                               v22 = load.i64 notrap aligned readonly can_move v0+40
+;; @0035                               v22 = load.i64 notrap aligned readonly can_move region3 v0+40
 ;; @0035                               v23 = load.i32 notrap aligned readonly can_move v22+4
-;; @0035                               v24 = load.i32 user6 aligned readonly v16+16
+;; @0035                               v24 = load.i32 user6 aligned readonly region4 v16+16
 ;; @0035                               v25 = icmp eq v24, v23
 ;; @0035                               trapz v25, user7
-;; @0035                               v26 = load.i64 notrap aligned readonly v16+8
-;; @0035                               v27 = load.i64 notrap aligned readonly v16+24
+;; @0035                               v26 = load.i64 notrap aligned readonly region5 v16+8
+;; @0035                               v27 = load.i64 notrap aligned readonly region6 v16+24
 ;; @0035                               v28 = call_indirect sig0, v26(v27, v0, v2)
 ;; @0038                               jump block1
 ;;

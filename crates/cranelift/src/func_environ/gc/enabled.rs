@@ -1256,9 +1256,12 @@ pub fn translate_ref_test(
                 object_size: wasmtime_environ::VM_GC_HEADER_SIZE,
             },
         );
+        let gc_heap_region = func_env.gc_heap_alias_region(&mut builder.func);
         let actual_kind = builder.ins().load(
             ir::types::I32,
-            ir::MemFlagsData::trusted().with_readonly(),
+            ir::MemFlagsData::trusted()
+                .with_readonly()
+                .with_alias_region(Some(gc_heap_region)),
             kind_addr,
             0,
         );
@@ -1313,9 +1316,12 @@ pub fn translate_ref_test(
                     access_size: func_env.offsets.size_of_vmshared_type_index(),
                 },
             );
+            let gc_heap_region = func_env.gc_heap_alias_region(&mut builder.func);
             let actual_shared_ty = builder.ins().load(
                 ir::types::I32,
-                ir::MemFlagsData::trusted().with_readonly(),
+                ir::MemFlagsData::trusted()
+                    .with_readonly()
+                    .with_alias_region(Some(gc_heap_region)),
                 ty_addr,
                 0,
             );
@@ -1502,9 +1508,14 @@ impl FuncEnvironment<'_> {
         let store_context_ptr = self.get_vmstore_context_ptr_global(func);
         let offset = self.offsets.ptr.vmstore_context_gc_heap_base();
 
-        let mut flags = ir::MemFlagsData::trusted();
+        let region = self.vmctx_alias_region(
+            func,
+            wasmtime_environ::VmctxType::VMStoreContext,
+            u32::from(offset),
+        );
         let memory_tunables =
             wasmtime_environ::MemoryTunables::new(self.tunables, MemoryKind::GcHeap);
+        let mut flags = ir::MemFlagsData::trusted().with_alias_region(Some(region));
         if !self
             .tunables
             .gc_heap_memory_type()
@@ -1539,7 +1550,15 @@ impl FuncEnvironment<'_> {
         }
         let store_context_ptr = self.get_vmstore_context_ptr_global(func);
         let offset = self.offsets.ptr.vmstore_context_gc_heap_current_length();
-        let flags = func.dfg.mem_flags.insert(ir::MemFlagsData::trusted());
+        let region = self.vmctx_alias_region(
+            func,
+            wasmtime_environ::VmctxType::VMStoreContext,
+            u32::from(offset),
+        );
+        let flags = func
+            .dfg
+            .mem_flags
+            .insert(ir::MemFlagsData::trusted().with_alias_region(Some(region)));
         let bound = func.create_global_value(ir::GlobalValueData::Load {
             base: store_context_ptr,
             offset: Offset32::new(offset.into()),

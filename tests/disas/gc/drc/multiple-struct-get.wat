@@ -12,28 +12,31 @@
   )
 )
 ;; function u0:0(i64 vmctx, i64, i32) -> f32, i32 tail {
-;;     region0 = 1879048192 "GcHeap"
+;;     region0 = 8 "VMContext+0x8"
+;;     region1 = 8388640 "VMStoreContext+0x20"
+;;     region2 = 8388648 "VMStoreContext+0x28"
+;;     region3 = 1879048192 "GcHeap"
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly gv0+8
 ;;     gv2 = load.i64 notrap aligned gv1+24
 ;;     gv3 = vmctx
-;;     gv4 = load.i64 notrap aligned readonly can_move gv3+8
-;;     gv5 = load.i64 notrap aligned readonly can_move gv4+32
-;;     gv6 = load.i64 notrap aligned gv4+40
+;;     gv4 = load.i64 notrap aligned readonly can_move region0 gv3+8
+;;     gv5 = load.i64 notrap aligned readonly can_move region1 gv4+32
+;;     gv6 = load.i64 notrap aligned region2 gv4+40
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32):
 ;; @0023                               trapz v2, user15
-;; @0023                               v20 = load.i64 notrap aligned readonly can_move v0+8
-;; @0023                               v6 = load.i64 notrap aligned readonly can_move v20+32
+;; @0023                               v20 = load.i64 notrap aligned readonly can_move region0 v0+8
+;; @0023                               v6 = load.i64 notrap aligned readonly can_move region1 v20+32
 ;; @0023                               v5 = uextend.i64 v2
 ;; @0023                               v7 = iadd v6, v5
 ;; @0023                               v8 = iconst.i64 24
 ;; @0023                               v9 = iadd v7, v8  ; v8 = 24
-;; @0023                               v10 = load.f32 notrap aligned little region0 v9
+;; @0023                               v10 = load.f32 notrap aligned little region3 v9
 ;; @0029                               v14 = iconst.i64 28
 ;; @0029                               v15 = iadd v7, v14  ; v14 = 28
-;; @0029                               v16 = load.i8 notrap aligned little region0 v15
+;; @0029                               v16 = load.i8 notrap aligned little region3 v15
 ;; @002d                               jump block1
 ;;
 ;;                                 block1:

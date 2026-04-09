@@ -4,7 +4,7 @@ use super::{PulleyFlags, PulleyTargetKind, inst::*};
 use crate::isa::pulley_shared::PointerWidth;
 use crate::{
     CodegenResult,
-    ir::{self, MemFlagsData, MemFlagsSet, Signature, types::*},
+    ir::{self, MemFlagsSet, Signature, types::*},
     isa,
     machinst::*,
     settings,
