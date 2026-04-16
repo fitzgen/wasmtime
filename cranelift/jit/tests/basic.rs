@@ -1,5 +1,5 @@
 use cranelift_codegen::ir::*;
-use cranelift_codegen::isa::{CallConv, OwnedTargetIsa};
+use cranelift_codegen::isa::{CallConv, OwnedTargetIsa, TargetFrontendConfig};
 use cranelift_codegen::settings::{self, Configurable};
 use cranelift_codegen::{Context, ir::types::I16};
 use cranelift_entity::EntityRef;
@@ -73,6 +73,14 @@ fn panic_on_define_after_finalize() {
     define_simple_function(&mut module).err().unwrap();
 }
 
+fn target_config() -> TargetFrontendConfig {
+    TargetFrontendConfig {
+        default_call_conv: CallConv::SystemV,
+        pointer_width: target_lexicon::PointerWidth::U64,
+        page_size_align_log2: 12,
+    }
+}
+
 #[test]
 fn switch_error() {
     use cranelift_codegen::settings;
@@ -132,7 +140,7 @@ fn switch_error() {
         bcx.ins().return_(&[r]);
 
         bcx.seal_all_blocks();
-        bcx.finalize();
+        bcx.finalize(target_config());
     }
 
     let flags = settings::Flags::new(settings::builder());

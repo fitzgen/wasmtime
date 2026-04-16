@@ -1,5 +1,5 @@
 use cranelift_codegen::ir::*;
-use cranelift_codegen::isa::CallConv;
+use cranelift_codegen::isa::{CallConv, TargetFrontendConfig};
 use cranelift_codegen::settings;
 use cranelift_codegen::{Context, ir::types::I16};
 use cranelift_entity::EntityRef;
@@ -91,6 +91,14 @@ fn panic_on_declare_without_define() {
     module.finish();
 }
 
+fn target_config() -> TargetFrontendConfig {
+    TargetFrontendConfig {
+        default_call_conv: CallConv::SystemV,
+        pointer_width: target_lexicon::PointerWidth::U64,
+        page_size_align_log2: 12,
+    }
+}
+
 #[test]
 fn switch_error() {
     use cranelift_codegen::settings;
@@ -149,7 +157,7 @@ fn switch_error() {
         bcx.ins().return_(&[r]);
 
         bcx.seal_all_blocks();
-        bcx.finalize();
+        bcx.finalize(target_config());
     }
 
     let flags = settings::Flags::new(settings::builder());
@@ -301,7 +309,7 @@ fn aarch64_colocated_data_symbol_reloc() {
         bcx.ins().return_(&[addr]);
 
         bcx.seal_all_blocks();
-        bcx.finalize();
+        bcx.finalize(target_config());
     }
 
     module.define_function(func_id, &mut ctx).unwrap();

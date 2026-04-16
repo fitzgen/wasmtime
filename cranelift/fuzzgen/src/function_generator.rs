@@ -23,7 +23,7 @@ use std::collections::HashMap;
 use std::ops::RangeInclusive;
 use std::str::FromStr;
 use std::sync::LazyLock;
-use target_lexicon::{Architecture, Triple};
+use target_lexicon::{Architecture, PointerWidth, Triple};
 
 type BlockSignature = Vec<Type>;
 
@@ -1991,7 +1991,15 @@ where
         }
 
         builder.seal_all_blocks();
-        builder.finalize();
+        builder.finalize(cranelift::prelude::isa::TargetFrontendConfig {
+            default_call_conv: self.signature.call_conv,
+            pointer_width: self
+                .u
+                .choose(&[PointerWidth::U16, PointerWidth::U32, PointerWidth::U64])
+                .copied()
+                .unwrap(),
+            page_size_align_log2: self.u.choose_index(17).unwrap().try_into().unwrap(),
+        });
 
         Ok(func)
     }

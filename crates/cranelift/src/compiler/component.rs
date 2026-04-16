@@ -1647,7 +1647,7 @@ impl ComponentCompiler for Compiler {
         );
 
         c.translate(&component.trampolines[trampoline_index]);
-        c.builder.finalize();
+        c.builder.finalize(self.isa.frontend_config());
         compiler.cx.abi = Some(abi);
 
         Ok(CompiledFunctionBody {
@@ -1754,7 +1754,7 @@ impl ComponentCompiler for Compiler {
             }
         }
 
-        c.builder.finalize();
+        c.builder.finalize(self.isa.frontend_config());
         compiler.cx.abi = Some(abi);
 
         Ok(CompiledFunctionBody {
