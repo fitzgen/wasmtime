@@ -2264,6 +2264,7 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
     fn handle_call_result_stackmap(&mut self, results: &[ir::Value], sig_ref: ir::SigRef) {
         for (i, &val) in results.iter().enumerate() {
             if self.env.sig_ref_result_needs_stack_map(sig_ref, i) {
+                log::trace!("result {i}={val} of {sig_ref} call needs stack map");
                 self.builder.declare_value_needs_stack_map(val);
             }
         }
@@ -2745,6 +2746,7 @@ impl FuncEnvironment<'_> {
             &[vmctx, interned_type_index, data_index, data_offset, len],
         );
         let array_ref = builder.func.dfg.first_result(call_inst);
+        log::trace!("array_new_data() -> {array_ref} needs stack map");
         builder.declare_value_needs_stack_map(array_ref);
         Ok(array_ref)
     }
@@ -2769,6 +2771,7 @@ impl FuncEnvironment<'_> {
             &[vmctx, interned_type_index, elem_index, elem_offset, len],
         );
         let array_ref = builder.func.dfg.first_result(call_inst);
+        log::trace!("array_new_elem() -> {array_ref} needs stack map");
         builder.declare_value_needs_stack_map(array_ref);
         Ok(array_ref)
     }

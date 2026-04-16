@@ -123,6 +123,7 @@ fn declare_wasm_parameters(
             next_local += 1;
 
             if environ.param_needs_stack_map(&builder.func.signature, i) {
+                log::trace!("entry block param {i} = {local} needs stack map");
                 builder.declare_var_needs_stack_map(local);
             }
 
@@ -222,6 +223,7 @@ fn declare_locals(
         let local = builder.declare_var(ty);
         debug_assert_eq!(local.index(), *next_local);
         if needs_stack_map {
+            log::trace!("wasm local {local} needs stack map");
             builder.declare_var_needs_stack_map(local);
         }
         if let Some(init) = init {

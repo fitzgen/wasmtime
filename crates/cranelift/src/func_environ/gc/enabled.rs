@@ -84,6 +84,7 @@ fn unbarriered_load_gc_ref(
     debug_assert!(ty.is_vmgcref_type());
     let gc_ref = builder.ins().load(ir::types::I32, flags, ptr_to_gc_ref, 0);
     if ty != WasmHeapType::I31 {
+        log::trace!("unbarriered_load_gc_ref() -> {gc_ref} needs stack map");
         builder.declare_value_needs_stack_map(gc_ref);
     }
     Ok(gc_ref)
@@ -132,6 +133,7 @@ fn emit_gc_raw_alloc(
         .call(gc_alloc_raw_builtin, &[vmctx, kind, ty, size, align]);
 
     let gc_ref = builder.func.dfg.first_result(call_inst);
+    log::trace!("gc_alloc_raw() -> {gc_ref} needs stack map");
     builder.declare_value_needs_stack_map(gc_ref);
     gc_ref
 }

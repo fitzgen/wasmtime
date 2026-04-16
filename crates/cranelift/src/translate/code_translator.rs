@@ -240,6 +240,7 @@ pub fn translate_operator(
                 .iter()
                 .any(|ty| environ.val_ty_needs_stack_map(*ty))
             {
+                log::trace!("select -> {val} needs stack map");
                 builder.declare_value_needs_stack_map(val);
             }
 
@@ -4465,6 +4466,7 @@ fn create_catch_block(
     };
 
     if needs_stack_map {
+        log::trace!("catch block param {exn_ref} needs stack map");
         builder.declare_value_needs_stack_map(exn_ref);
     }
 
