@@ -67,6 +67,10 @@ impl FuncTranslator {
         debug_assert_eq!(func.dfg.num_insts(), 0, "Function must be empty");
 
         let mut builder = FunctionBuilder::new(func, &mut self.func_ctx);
+        // `VMGcRef`s are always little endian.
+        builder.set_stack_map_mem_flags(
+            ir::MemFlags::trusted().with_endianness(ir::Endianness::Little),
+        );
         builder.set_srcloc(cur_srcloc(&reader));
         let entry_block = builder.create_block();
         builder.append_block_params_for_function_params(entry_block);

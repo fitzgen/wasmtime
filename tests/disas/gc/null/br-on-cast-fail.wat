@@ -31,12 +31,12 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32):
-;;                                     v42 = stack_addr.i64 ss0
-;;                                     store notrap v2, v42
-;;                                     v40 = iconst.i32 0
-;; @002e                               v4 = icmp eq v2, v40  ; v40 = 0
+;;                                     v39 = stack_addr.i64 ss0
+;;                                     store notrap aligned little v2, v39
+;;                                     v42 = iconst.i32 0
+;; @002e                               v4 = icmp eq v2, v42  ; v42 = 0
 ;; @002e                               v5 = uextend.i32 v4
-;; @002e                               brif v5, block5(v40), block3  ; v40 = 0
+;; @002e                               brif v5, block5(v42), block3  ; v42 = 0
 ;;
 ;;                                 block3:
 ;; @002e                               v7 = iconst.i32 1
@@ -45,8 +45,8 @@
 ;; @002e                               brif v8, block5(v43), block4  ; v43 = 0
 ;;
 ;;                                 block4:
-;; @002e                               v36 = load.i64 notrap aligned readonly can_move v0+8
-;; @002e                               v14 = load.i64 notrap aligned readonly can_move v36+32
+;; @002e                               v40 = load.i64 notrap aligned readonly can_move v0+8
+;; @002e                               v14 = load.i64 notrap aligned readonly can_move v40+32
 ;; @002e                               v13 = uextend.i64 v2
 ;; @002e                               v15 = iadd v14, v13
 ;; @002e                               v16 = iconst.i64 4
@@ -66,7 +66,7 @@
 ;; @002e                               jump block5(v23)
 ;;
 ;;                                 block5(v24: i32):
-;;                                     v31 = load.i32 notrap v42
+;;                                     v32 = load.i32 notrap aligned little v39
 ;; @002e                               brif v24, block8, block2
 ;;
 ;;                                 block8:

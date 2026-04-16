@@ -1455,6 +1455,10 @@ impl FunctionCompiler<'_> {
             &mut self.cx.codegen_context.func,
             self.cx.func_translator.context(),
         );
+        // `VMGcRef`s are always little endian.
+        builder.set_stack_map_mem_flags(
+            ir::MemFlags::trusted().with_endianness(ir::Endianness::Little),
+        );
 
         let block0 = builder.create_block();
         builder.append_block_params_for_function_params(block0);

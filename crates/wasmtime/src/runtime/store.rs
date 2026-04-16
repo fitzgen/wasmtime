@@ -2233,7 +2233,7 @@ impl StoreOpaque {
         let raw: u32 = unsafe { core::ptr::read(stack_slot) };
         log::trace!("Stack slot @ {stack_slot:p} = {raw:#x}");
 
-        let gc_ref = vm::VMGcRef::from_raw_u32(raw);
+        let gc_ref = vm::VMGcRef::from_raw_ne_u32(raw);
         if gc_ref.is_some() {
             unsafe {
                 gc_roots_list
@@ -2774,7 +2774,7 @@ at https://bytecodealliance.org/security.
     fn throw_impl(&mut self, exception: Rooted<ExnRef>) {
         let mut nogc = AutoAssertNoGc::new(self);
         let exnref = exception._to_raw(&mut nogc).unwrap();
-        let exnref = VMGcRef::from_raw_u32(exnref)
+        let exnref = VMGcRef::from_raw_ne_u32(exnref)
             .expect("exception cannot be null")
             .into_exnref_unchecked();
         nogc.set_pending_exception(exnref);

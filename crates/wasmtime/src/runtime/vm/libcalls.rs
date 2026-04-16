@@ -344,7 +344,7 @@ fn table_grow_gc_ref(
     init_value: u32,
 ) -> Result<Option<AllocationSize>> {
     let defined_table_index = DefinedTableIndex::from_u32(defined_table_index);
-    let element = VMGcRef::from_raw_u32(init_value);
+    let element = VMGcRef::from_raw_ne_u32(init_value);
     let (mut limiter, store) = store.resource_limiter_and_store_opaque();
     let limiter = limiter.as_mut();
     block_on!(store, async |store, _| {
@@ -437,7 +437,7 @@ fn table_fill_gc_ref(
     match table.element_type() {
         TableElementType::Func => unreachable!(),
         TableElementType::GcRef => {
-            let gc_ref = VMGcRef::from_raw_u32(val);
+            let gc_ref = VMGcRef::from_raw_ne_u32(val);
             table.fill_gc_ref(gc_store, dst, gc_ref.as_ref(), len)?;
             Ok(())
         }
@@ -622,7 +622,7 @@ fn table_get_lazy_init_func_ref(
 #[cfg(feature = "gc-drc")]
 fn drop_gc_ref(store: &mut dyn VMStore, _instance: InstanceId, gc_ref: u32) {
     log::trace!("libcalls::drop_gc_ref({gc_ref:#x})");
-    let gc_ref = VMGcRef::from_raw_u32(gc_ref).expect("non-null VMGcRef");
+    let gc_ref = VMGcRef::from_raw_ne_u32(gc_ref).expect("non-null VMGcRef");
     store
         .store_opaque_mut()
         .unwrap_gc_store_mut()
@@ -888,7 +888,7 @@ fn array_init_data(
     );
 
     // Null check the array.
-    let gc_ref = VMGcRef::from_raw_u32(array).ok_or_else(|| Trap::NullReference)?;
+    let gc_ref = VMGcRef::from_raw_ne_u32(array).ok_or_else(|| Trap::NullReference)?;
     let array = gc_ref
         .into_arrayref(&*store.unwrap_gc_store().gc_heap)
         .expect("gc ref should be an array");
@@ -1043,7 +1043,7 @@ fn array_init_elem(
     );
 
     // Convert the raw GC ref into a `Rooted<ArrayRef>`.
-    let array = VMGcRef::from_raw_u32(array).ok_or_else(|| Trap::NullReference)?;
+    let array = VMGcRef::from_raw_ne_u32(array).ok_or_else(|| Trap::NullReference)?;
     let array = store.unwrap_gc_store_mut().clone_gc_ref(&array);
     let array = {
         let mut no_gc = AutoAssertNoGc::new(&mut store);
@@ -1126,10 +1126,10 @@ fn array_copy(
     let mut store = AutoAssertNoGc::new(&mut store);
 
     // Convert the raw GC refs into `Rooted<ArrayRef>`s.
-    let dst_array = VMGcRef::from_raw_u32(dst_array).ok_or_else(|| Trap::NullReference)?;
+    let dst_array = VMGcRef::from_raw_ne_u32(dst_array).ok_or_else(|| Trap::NullReference)?;
     let dst_array = store.unwrap_gc_store_mut().clone_gc_ref(&dst_array);
     let dst_array = ArrayRef::from_cloned_gc_ref(&mut store, dst_array);
-    let src_array = VMGcRef::from_raw_u32(src_array).ok_or_else(|| Trap::NullReference)?;
+    let src_array = VMGcRef::from_raw_ne_u32(src_array).ok_or_else(|| Trap::NullReference)?;
     let src_array = store.unwrap_gc_store_mut().clone_gc_ref(&src_array);
     let src_array = ArrayRef::from_cloned_gc_ref(&mut store, src_array);
 
@@ -1702,7 +1702,7 @@ fn throw_ref(
     _instance: InstanceId,
     exnref: u32,
 ) -> Result<(), TrapReason> {
-    let exnref = VMGcRef::from_raw_u32(exnref).ok_or_else(|| Trap::NullReference)?;
+    let exnref = VMGcRef::from_raw_ne_u32(exnref).ok_or_else(|| Trap::NullReference)?;
     let exnref = store.unwrap_gc_store_mut().clone_gc_ref(&exnref);
     let exnref = exnref
         .into_exnref(&*store.unwrap_gc_store().gc_heap)

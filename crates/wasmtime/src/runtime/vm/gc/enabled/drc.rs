@@ -245,7 +245,7 @@ impl DrcHeap {
                             let raw: [u8; 4] = heap[field_start..field_end].try_into().unwrap();
                             let raw = u32::from_le_bytes(raw);
 
-                            if let Some(child) = VMGcRef::from_raw_u32(raw)
+                            if let Some(child) = VMGcRef::from_raw_ne_u32(raw)
                                 && !child.is_i31()
                             {
                                 debug_assert!({
@@ -266,7 +266,7 @@ impl DrcHeap {
                                 let elem_offset = GC_REF_ARRAY_ELEMS_OFFSET
                                     + i * u32::try_from(mem::size_of::<u32>()).unwrap();
                                 let raw = data.read_u32(elem_offset);
-                                if let Some(child) = VMGcRef::from_raw_u32(raw)
+                                if let Some(child) = VMGcRef::from_raw_ne_u32(raw)
                                     && !child.is_i31()
                                 {
                                     debug_assert!({

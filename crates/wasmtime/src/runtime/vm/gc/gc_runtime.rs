@@ -598,9 +598,9 @@ impl GcRootsList {
             log::trace!(
                 "Adding Wasm stack root: {:#p} -> {:#p}",
                 ptr_to_root,
-                VMGcRef::from_raw_u32(*ptr_to_root.as_ref()).unwrap()
+                VMGcRef::from_raw_le_u32(*ptr_to_root.as_ref()).unwrap()
             );
-            debug_assert!(VMGcRef::from_raw_u32(*ptr_to_root.as_ref()).is_some());
+            debug_assert!(VMGcRef::from_raw_le_u32(*ptr_to_root.as_ref()).is_some());
         }
         self.0.push(RawGcRoot::Stack(ptr_to_root));
     }
@@ -690,8 +690,9 @@ impl GcRoot<'_> {
         match self.raw {
             RawGcRoot::NonStack(ptr) => unsafe { ptr::read(ptr.as_ptr()) },
             RawGcRoot::Stack(ptr) => unsafe {
-                let raw: u32 = ptr::read(ptr.as_ptr());
-                VMGcRef::from_raw_u32(raw).expect("non-null")
+                // We always store GC refs as little-endian in stack maps.
+                let raw_le: u32 = ptr::read(ptr.as_ptr());
+                VMGcRef::from_raw_le_u32(raw_le).expect("non-null")
             },
         }
     }
@@ -709,7 +710,7 @@ impl GcRoot<'_> {
                 ptr::write(ptr.as_ptr(), new_ref);
             },
             RawGcRoot::Stack(ptr) => unsafe {
-                ptr::write(ptr.as_ptr(), new_ref.as_raw_u32());
+                ptr::write(ptr.as_ptr(), new_ref.as_raw_le_u32());
             },
         }
     }

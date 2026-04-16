@@ -1218,7 +1218,7 @@ impl<T: GcRef> Rooted<T> {
                 // NB: do not force the allocation of a GC heap just because the
                 // program is using `i31ref`s.
                 debug_assert!(gc_ref.is_i31());
-                gc_ref.as_raw_non_zero_u32()
+                gc_ref.as_raw_ne_non_zero_u32()
             }
         };
 
@@ -1234,7 +1234,7 @@ impl<T: GcRef> Rooted<T> {
         from_cloned_gc_ref: impl Fn(&mut AutoAssertNoGc<'_>, VMGcRef) -> Self,
     ) -> Self {
         debug_assert_ne!(raw_gc_ref, 0);
-        let gc_ref = VMGcRef::from_raw_u32(raw_gc_ref).expect("non-null");
+        let gc_ref = VMGcRef::from_raw_ne_u32(raw_gc_ref).expect("non-null");
 
         let gc_ref = match store.optional_gc_store_mut() {
             Some(s) => s.clone_gc_ref(&gc_ref),
@@ -1273,7 +1273,7 @@ impl<T: GcRef> Rooted<T> {
         raw_gc_ref: u32,
         from_cloned_gc_ref: impl Fn(&mut AutoAssertNoGc<'_>, VMGcRef) -> Self,
     ) -> Option<Self> {
-        let gc_ref = VMGcRef::from_raw_u32(raw_gc_ref)?;
+        let gc_ref = VMGcRef::from_raw_ne_u32(raw_gc_ref)?;
         let gc_ref = store.clone_gc_ref(&gc_ref);
         Some(from_cloned_gc_ref(store, gc_ref))
     }
@@ -1832,7 +1832,7 @@ where
             Some(s) => s.expose_gc_ref_to_wasm(gc_ref),
             None => {
                 debug_assert!(gc_ref.is_i31());
-                gc_ref.as_raw_non_zero_u32()
+                gc_ref.as_raw_ne_non_zero_u32()
             }
         };
 
@@ -1848,7 +1848,7 @@ where
         from_cloned_gc_ref: impl Fn(&mut AutoAssertNoGc<'_>, VMGcRef) -> Rooted<T>,
     ) -> Self {
         debug_assert_ne!(raw_gc_ref, 0);
-        let gc_ref = VMGcRef::from_raw_u32(raw_gc_ref).expect("non-null");
+        let gc_ref = VMGcRef::from_raw_ne_u32(raw_gc_ref).expect("non-null");
         let gc_ref = store.clone_gc_ref(&gc_ref);
         RootSet::with_lifo_scope(store, |store| {
             let rooted = from_cloned_gc_ref(store, gc_ref);
@@ -1880,7 +1880,7 @@ where
         raw_gc_ref: u32,
         from_cloned_gc_ref: impl Fn(&mut AutoAssertNoGc<'_>, VMGcRef) -> Rooted<T>,
     ) -> Option<Self> {
-        let gc_ref = VMGcRef::from_raw_u32(raw_gc_ref)?;
+        let gc_ref = VMGcRef::from_raw_ne_u32(raw_gc_ref)?;
         let gc_ref = store.clone_gc_ref(&gc_ref);
         RootSet::with_lifo_scope(store, |store| {
             let rooted = from_cloned_gc_ref(store, gc_ref);

@@ -551,14 +551,14 @@ impl CopyingHeap {
             .unwrap();
         let raw = u32::from_le_bytes(raw);
 
-        if let Some(child) = VMGcRef::from_raw_u32(raw)
+        if let Some(child) = VMGcRef::from_raw_ne_u32(raw)
             && !child.is_i31()
         {
             debug_assert!(self.is_in_idle_space(child.as_heap_index().unwrap().get()));
             let new_ref = self.forward(&child);
             debug_assert!(self.is_in_active_space(new_ref.as_heap_index().unwrap().get()));
             // Write the new reference back.
-            let new_raw = new_ref.as_raw_u32().to_le_bytes();
+            let new_raw = new_ref.as_raw_ne_u32().to_le_bytes();
             self.heap_slice_mut()[field_start..field_end].copy_from_slice(&new_raw);
         }
     }

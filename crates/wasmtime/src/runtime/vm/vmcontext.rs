@@ -569,17 +569,17 @@ impl VMGlobalDefinition {
                 WasmValType::V128 => global.set_u128(raw.get_v128()),
                 WasmValType::Ref(r) => match r.heap_type.top() {
                     WasmHeapTopType::Extern => {
-                        let r = VMGcRef::from_raw_u32(raw.get_externref());
+                        let r = VMGcRef::from_raw_ne_u32(raw.get_externref());
                         global.init_gc_ref(store, r.as_ref())
                     }
                     WasmHeapTopType::Any => {
-                        let r = VMGcRef::from_raw_u32(raw.get_anyref());
+                        let r = VMGcRef::from_raw_ne_u32(raw.get_anyref());
                         global.init_gc_ref(store, r.as_ref())
                     }
                     WasmHeapTopType::Func => *global.as_func_ref_mut() = raw.get_funcref().cast(),
                     WasmHeapTopType::Cont => *global.as_func_ref_mut() = raw.get_funcref().cast(), // TODO(#10248): temporary hack.
                     WasmHeapTopType::Exn => {
-                        let r = VMGcRef::from_raw_u32(raw.get_exnref());
+                        let r = VMGcRef::from_raw_ne_u32(raw.get_exnref());
                         global.init_gc_ref(store, r.as_ref())
                     }
                 },
@@ -607,18 +607,18 @@ impl VMGlobalDefinition {
                 WasmValType::V128 => ValRaw::v128(self.get_u128()),
                 WasmValType::Ref(r) => match r.heap_type.top() {
                     WasmHeapTopType::Extern => ValRaw::externref(match self.as_gc_ref() {
-                        Some(r) => store.clone_gc_ref(r).as_raw_u32(),
+                        Some(r) => store.clone_gc_ref(r).as_raw_ne_u32(),
                         None => 0,
                     }),
                     WasmHeapTopType::Any => ValRaw::anyref({
                         match self.as_gc_ref() {
-                            Some(r) => store.clone_gc_ref(r).as_raw_u32(),
+                            Some(r) => store.clone_gc_ref(r).as_raw_ne_u32(),
                             None => 0,
                         }
                     }),
                     WasmHeapTopType::Exn => ValRaw::exnref({
                         match self.as_gc_ref() {
-                            Some(r) => store.clone_gc_ref(r).as_raw_u32(),
+                            Some(r) => store.clone_gc_ref(r).as_raw_ne_u32(),
                             None => 0,
                         }
                     }),

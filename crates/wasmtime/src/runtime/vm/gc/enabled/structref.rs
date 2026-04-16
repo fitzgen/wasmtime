@@ -190,7 +190,7 @@ impl VMStructRef {
             // it up in the future.
             Val::ExternRef(e) => {
                 let raw = data.read_u32(offset);
-                let mut gc_ref = VMGcRef::from_raw_u32(raw);
+                let mut gc_ref = VMGcRef::from_raw_ne_u32(raw);
                 let e = match e {
                     Some(e) => Some(e.try_gc_ref(store)?.unchecked_copy()),
                     None => None,
@@ -198,11 +198,11 @@ impl VMStructRef {
                 let store = store.require_gc_store_mut()?;
                 store.write_gc_ref(&mut gc_ref, e.as_ref());
                 let data = store.gc_object_data(self.as_gc_ref());
-                data.write_u32(offset, gc_ref.map_or(0, |r| r.as_raw_u32()));
+                data.write_u32(offset, gc_ref.map_or(0, |r| r.as_raw_ne_u32()));
             }
             Val::AnyRef(a) => {
                 let raw = data.read_u32(offset);
-                let mut gc_ref = VMGcRef::from_raw_u32(raw);
+                let mut gc_ref = VMGcRef::from_raw_ne_u32(raw);
                 let a = match a {
                     Some(a) => Some(a.try_gc_ref(store)?.unchecked_copy()),
                     None => None,
@@ -210,11 +210,11 @@ impl VMStructRef {
                 let store = store.require_gc_store_mut()?;
                 store.write_gc_ref(&mut gc_ref, a.as_ref());
                 let data = store.gc_object_data(self.as_gc_ref());
-                data.write_u32(offset, gc_ref.map_or(0, |r| r.as_raw_u32()));
+                data.write_u32(offset, gc_ref.map_or(0, |r| r.as_raw_ne_u32()));
             }
             Val::ExnRef(e) => {
                 let raw = data.read_u32(offset);
-                let mut gc_ref = VMGcRef::from_raw_u32(raw);
+                let mut gc_ref = VMGcRef::from_raw_ne_u32(raw);
                 let e = match e {
                     Some(e) => Some(e.try_gc_ref(store)?.unchecked_copy()),
                     None => None,
@@ -222,7 +222,7 @@ impl VMStructRef {
                 let store = store.require_gc_store_mut()?;
                 store.write_gc_ref(&mut gc_ref, e.as_ref());
                 let data = store.gc_object_data(self.as_gc_ref());
-                data.write_u32(offset, gc_ref.map_or(0, |r| r.as_raw_u32()));
+                data.write_u32(offset, gc_ref.map_or(0, |r| r.as_raw_ne_u32()));
             }
 
             Val::FuncRef(f) => {
@@ -356,7 +356,7 @@ pub(crate) fn initialize_field_impl(
         Val::ExternRef(x) => {
             let x = match x {
                 None => 0,
-                Some(x) => x.try_clone_gc_ref(store)?.as_raw_u32(),
+                Some(x) => x.try_clone_gc_ref(store)?.as_raw_ne_u32(),
             };
             store
                 .require_gc_store_mut()?
@@ -366,7 +366,7 @@ pub(crate) fn initialize_field_impl(
         Val::AnyRef(x) => {
             let x = match x {
                 None => 0,
-                Some(x) => x.try_clone_gc_ref(store)?.as_raw_u32(),
+                Some(x) => x.try_clone_gc_ref(store)?.as_raw_ne_u32(),
             };
             store
                 .require_gc_store_mut()?
@@ -376,7 +376,7 @@ pub(crate) fn initialize_field_impl(
         Val::ExnRef(x) => {
             let x = match x {
                 None => 0,
-                Some(x) => x.try_clone_gc_ref(store)?.as_raw_u32(),
+                Some(x) => x.try_clone_gc_ref(store)?.as_raw_ne_u32(),
             };
             store
                 .require_gc_store_mut()?

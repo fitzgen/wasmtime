@@ -23,28 +23,28 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: f32, v3: i32, v4: i32):
-;;                                     v27 = stack_addr.i64 ss0
-;;                                     store notrap v4, v27
+;;                                     v22 = stack_addr.i64 ss0
+;;                                     store notrap aligned little v4, v22
 ;; @002a                               v8 = iconst.i32 -1342177280
 ;; @002a                               v10 = load.i64 notrap aligned readonly can_move v0+40
 ;; @002a                               v11 = load.i32 notrap aligned readonly can_move v10
 ;; @002a                               v6 = iconst.i32 32
 ;; @002a                               v12 = iconst.i32 16
 ;; @002a                               v13 = call fn0(v0, v8, v11, v6, v12), stack_map=[i32 @ ss0+0]  ; v8 = -1342177280, v6 = 32, v12 = 16
-;; @002a                               v25 = load.i64 notrap aligned readonly can_move v0+8
-;; @002a                               v14 = load.i64 notrap aligned readonly can_move v25+32
+;; @002a                               v26 = load.i64 notrap aligned readonly can_move v0+8
+;; @002a                               v14 = load.i64 notrap aligned readonly can_move v26+32
 ;; @002a                               v15 = uextend.i64 v13
 ;; @002a                               v16 = iadd v14, v15
-;;                                     v24 = iconst.i64 16
-;; @002a                               v17 = iadd v16, v24  ; v24 = 16
+;;                                     v25 = iconst.i64 16
+;; @002a                               v17 = iadd v16, v25  ; v25 = 16
 ;; @002a                               store notrap aligned little v2, v17
-;;                                     v23 = iconst.i64 20
-;; @002a                               v18 = iadd v16, v23  ; v23 = 20
+;;                                     v24 = iconst.i64 20
+;; @002a                               v18 = iadd v16, v24  ; v24 = 20
 ;; @002a                               istore8 notrap aligned little v3, v18
-;;                                     v20 = load.i32 notrap v27
-;;                                     v22 = iconst.i64 24
-;; @002a                               v19 = iadd v16, v22  ; v22 = 24
-;; @002a                               store notrap aligned little v20, v19
+;;                                     v21 = load.i32 notrap aligned little v22
+;;                                     v23 = iconst.i64 24
+;; @002a                               v19 = iadd v16, v23  ; v23 = 24
+;; @002a                               store notrap aligned little v21, v19
 ;; @002d                               jump block1
 ;;
 ;;                                 block1:
