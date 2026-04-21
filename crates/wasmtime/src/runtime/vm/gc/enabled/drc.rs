@@ -64,7 +64,8 @@ use core::{
 };
 use wasmtime_environ::drc::{ARRAY_LENGTH_OFFSET, DrcTypeLayouts};
 use wasmtime_environ::{
-    GcArrayLayout, GcStructLayout, GcTypeLayouts, POISON, VMGcKind, VMSharedTypeIndex, gc_assert,
+    GcArrayLayout, GcStructLayout, GcTypeLayouts, POISON, VMGcKind, VMSharedTypeIndex, endian::Le,
+    gc_assert,
 };
 
 #[expect(clippy::cast_possible_truncation, reason = "known to not overflow")]
@@ -161,7 +162,7 @@ impl DrcHeap {
 
         // Poison the freed memory so that any stale access is detectable.
         if cfg!(gc_zeal) {
-            let index = usize::try_from(index.get()).unwrap();
+            let index = usize::try_from(index.get_ne().get()).unwrap();
             let alloc_size = usize::try_from(alloc_size).unwrap();
             self.heap_slice_mut()[index..][..alloc_size].fill(POISON);
         }
@@ -170,7 +171,7 @@ impl DrcHeap {
         self.free_list
             .as_mut()
             .unwrap()
-            .dealloc_fast(index, alloc_size);
+            .dealloc_fast(index.get_ne(), alloc_size);
     }
 
     /// Increment the ref count for the associated object.
@@ -229,7 +230,8 @@ impl DrcHeap {
                         stack.reserve(gc_ref_offsets.len());
 
                         let object_start =
-                            usize::try_from(gc_ref.as_heap_index().unwrap().get()).unwrap();
+                            usize::try_from(gc_ref.as_heap_index().unwrap().get_ne().get())
+                                .unwrap();
                         let heap = self.heap_slice();
                         for offset in gc_ref_offsets {
                             let offset = usize::try_from(*offset).unwrap();
@@ -243,9 +245,9 @@ impl DrcHeap {
                                 field_end <= object_start + usize::try_from(object_size).unwrap()
                             );
                             let raw: [u8; 4] = heap[field_start..field_end].try_into().unwrap();
-                            let raw = u32::from_le_bytes(raw);
+                            let raw = <Le<u32>>::from_le_bytes(raw);
 
-                            if let Some(child) = VMGcRef::from_raw_ne_u32(raw)
+                            if let Some(child) = VMGcRef::from_raw_u32(raw)
                                 && !child.is_i31()
                             {
                                 debug_assert!({
@@ -266,7 +268,7 @@ impl DrcHeap {
                                 let elem_offset = GC_REF_ARRAY_ELEMS_OFFSET
                                     + i * u32::try_from(mem::size_of::<u32>()).unwrap();
                                 let raw = data.read_u32(elem_offset);
-                                if let Some(child) = VMGcRef::from_raw_ne_u32(raw)
+                                if let Some(child) = VMGcRef::from_raw_u32(raw)
                                     && !child.is_i31()
                                 {
                                     debug_assert!({
@@ -295,14 +297,14 @@ impl DrcHeap {
             let index = gc_ref.as_heap_index().unwrap();
 
             if cfg!(gc_zeal) {
-                let idx = usize::try_from(index.get()).unwrap();
+                let idx = usize::try_from(index.get_ne().get()).unwrap();
                 self.heap_slice_mut()[idx..][..usize::try_from(alloc_size).unwrap()].fill(POISON);
             }
 
             self.free_list
                 .as_mut()
                 .unwrap()
-                .dealloc_fast(index, alloc_size);
+                .dealloc_fast(index.get_ne(), alloc_size);
             self.allocated_bytes -= usize::try_from(alloc_size).unwrap();
         }
 
@@ -337,7 +339,7 @@ impl DrcHeap {
 
         let mut visited = HashSet::new();
         for gc_ref in self.iter_over_approximated_stack_roots() {
-            let idx = gc_ref.as_heap_index().unwrap().get();
+            let idx = gc_ref.as_heap_index().unwrap().get_ne().get();
 
             // Each entry must have a valid `VMGcKind`.
             let header = self.header(&gc_ref);
@@ -893,7 +895,7 @@ unsafe impl GcHeap for DrcHeap {
 
         let gc_ref = match self.free_list.as_mut().unwrap().alloc_fast(alloc_size) {
             None => return Ok(Err(u64::try_from(layout.size()).unwrap())),
-            Some(index) => VMGcRef::from_heap_index(index).unwrap_or_else(|| {
+            Some(index) => VMGcRef::from_heap_index(Le::from_ne(index)).unwrap_or_else(|| {
                 panic!("invalid GC heap index returned from free list alloc: {index:#x}")
             }),
         };
@@ -902,7 +904,7 @@ unsafe impl GcHeap for DrcHeap {
         // poison pattern, and hasn't been corrupted since deallocation (or
         // initial heap creation).
         if cfg!(gc_zeal) {
-            let start = usize::try_from(gc_ref.as_heap_index().unwrap().get()).unwrap();
+            let start = usize::try_from(gc_ref.as_heap_index().unwrap().get_ne().get()).unwrap();
             let slice = &self.heap_slice()[start..][..layout.size()];
             gc_assert!(
                 slice.iter().all(|&b| b == POISON),

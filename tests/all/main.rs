@@ -23,6 +23,7 @@ mod fuel;
 mod func;
 mod funcref;
 mod gc;
+mod copying_probe;
 mod globals;
 #[cfg(feature = "gdbstub")]
 mod guest_debug;

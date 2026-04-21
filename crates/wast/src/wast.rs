@@ -300,6 +300,7 @@ impl WastContext {
                             _ => bail!("expected core function, found other other argument {v:?}"),
                         })
                         .collect::<Result<Vec<_>>>()?;
+                    dbg!("FITZGEN", &values);
 
                     let mut results =
                         vec![Val::null_func_ref(); func.ty(&self.core_store).results().len()];
@@ -312,6 +313,7 @@ impl WastContext {
                         None => func.call(&mut self.core_store, &values, &mut results),
                     };
 
+                    dbg!("FITZGEN", &results);
                     Ok(match result {
                         Ok(()) => Outcome::Ok(Results::Core(results)),
                         Err(e) => Outcome::Trap(e),
@@ -493,6 +495,7 @@ impl WastContext {
     fn assert_return(&mut self, result: Outcome, results: &[Const]) -> Result<()> {
         match result.into_result()? {
             Results::Core(values) => {
+                dbg!("FITZGEN", &values);
                 if values.len() != results.len() {
                     bail!("expected {} results found {}", results.len(), values.len());
                 }

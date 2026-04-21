@@ -10,7 +10,9 @@ use crate::vm::VMMemoryDefinition;
 use core::ptr::NonNull;
 use core::slice;
 use core::{alloc::Layout, any::Any, marker, mem, ops::Range, ptr};
-use wasmtime_environ::{GcArrayLayout, GcStructLayout, GcTypeLayouts, VMSharedTypeIndex};
+use wasmtime_environ::{
+    GcArrayLayout, GcStructLayout, GcTypeLayouts, VMSharedTypeIndex, endian::Le,
+};
 
 /// Trait for integrating a garbage collector with the runtime.
 ///
@@ -457,9 +459,13 @@ pub unsafe trait GcHeap: 'static + Send + Sync {
     {
         assert!(!mem::needs_drop::<T>());
         let gc_ref = gc_ref.as_untyped();
-        let start = gc_ref.as_heap_index().unwrap().get();
+        let start = gc_ref.as_heap_index().unwrap().get_ne().get();
         let start = usize::try_from(start).unwrap();
         let len = mem::size_of::<T>();
+        log::trace!(
+            "FITZGEN: Accessing GC heap {start:#010x}..{:#010x}",
+            start.saturating_add(len)
+        );
         let slice = &self.heap_slice()[start..][..len];
         unsafe { &*(slice.as_ptr().cast::<T>()) }
     }
@@ -478,9 +484,13 @@ pub unsafe trait GcHeap: 'static + Send + Sync {
     {
         assert!(!mem::needs_drop::<T>());
         let gc_ref = gc_ref.as_untyped();
-        let start = gc_ref.as_heap_index().unwrap().get();
+        let start = gc_ref.as_heap_index().unwrap().get_ne().get();
         let start = usize::try_from(start).unwrap();
         let len = mem::size_of::<T>();
+        log::trace!(
+            "FITZGEN: Accessing GC heap {start:#010x}..{:#010x}",
+            start.saturating_add(len)
+        );
         let slice = &mut self.heap_slice_mut()[start..][..len];
         unsafe { &mut *(slice.as_mut_ptr().cast::<T>()) }
     }
@@ -491,7 +501,7 @@ pub unsafe trait GcHeap: 'static + Send + Sync {
     ///
     /// Panics on out of bounds or if the `gc_ref` is an `i31ref`.
     fn object_range(&self, gc_ref: &VMGcRef) -> Range<usize> {
-        let start = gc_ref.as_heap_index().unwrap().get();
+        let start = gc_ref.as_heap_index().unwrap().get_ne().get();
         let start = usize::try_from(start).unwrap();
         let size = self.object_size(gc_ref);
         let end = start.checked_add(size).unwrap();
@@ -585,7 +595,7 @@ pub struct GcRootsList(Vec<RawGcRoot>);
     )
 )]
 enum RawGcRoot {
-    Stack(SendSyncPtr<u32>),
+    Stack(SendSyncPtr<Le<u32>>),
     NonStack(SendSyncPtr<VMGcRef>),
 }
 
@@ -594,14 +604,18 @@ impl GcRootsList {
     /// Add a GC root that is inside a Wasm stack frame to this list.
     #[inline]
     pub unsafe fn add_wasm_stack_root(&mut self, ptr_to_root: SendSyncPtr<u32>) {
+        // We always store GC refs as little-endian in stack maps.
+        let ptr_to_root = ptr_to_root.cast::<Le<u32>>();
+
         unsafe {
-            log::trace!(
-                "Adding Wasm stack root: {:#p} -> {:#p}",
-                ptr_to_root,
-                VMGcRef::from_raw_le_u32(*ptr_to_root.as_ref()).unwrap()
+            let raw = ptr_to_root.read();
+            debug_assert!(
+                VMGcRef::from_raw_u32(raw).is_some(),
+                "add_wasm_stack_root({ptr_to_root:#p}) points to invalid VMGcRef: {raw:#010x}",
             );
-            debug_assert!(VMGcRef::from_raw_le_u32(*ptr_to_root.as_ref()).is_some());
+            log::trace!("Adding Wasm stack root: {ptr_to_root:#p} -> {raw:#010x}");
         }
+
         self.0.push(RawGcRoot::Stack(ptr_to_root));
     }
 
@@ -690,9 +704,8 @@ impl GcRoot<'_> {
         match self.raw {
             RawGcRoot::NonStack(ptr) => unsafe { ptr::read(ptr.as_ptr()) },
             RawGcRoot::Stack(ptr) => unsafe {
-                // We always store GC refs as little-endian in stack maps.
-                let raw_le: u32 = ptr::read(ptr.as_ptr());
-                VMGcRef::from_raw_le_u32(raw_le).expect("non-null")
+                let raw = ptr.read();
+                VMGcRef::from_raw_u32(raw).expect("non-null")
             },
         }
     }
@@ -705,12 +718,23 @@ impl GcRoot<'_> {
     /// pointers after the collector moves the GC object that the root is
     /// referencing.
     pub fn set(&mut self, new_ref: VMGcRef) {
+        log::trace!(
+            "Updating GC root {:#p}: {:p} -> {:p}",
+            match self.raw {
+                RawGcRoot::Stack(p) => p.as_ptr(),
+                RawGcRoot::NonStack(p) => p.as_ptr().cast(),
+            },
+            self.get(),
+            new_ref,
+        );
+
         match self.raw {
             RawGcRoot::NonStack(ptr) => unsafe {
                 ptr::write(ptr.as_ptr(), new_ref);
             },
-            RawGcRoot::Stack(ptr) => unsafe {
-                ptr::write(ptr.as_ptr(), new_ref.as_raw_le_u32());
+            RawGcRoot::Stack(mut ptr) => unsafe {
+                // We always store GC refs as little-endian in stack maps.
+                ptr.write(new_ref.as_raw_u32());
             },
         }
     }

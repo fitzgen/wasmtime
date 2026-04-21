@@ -105,6 +105,7 @@ fn unbarriered_store_type_at_offset(
     offset: i32,
     value: ir::Value,
 ) {
+    // TODO FITZGEN: need to add `little` mem flag here if this is a GC ref?
     pos.ins().store(flags, value, base, offset);
 }
 
@@ -125,6 +126,7 @@ fn unbarriered_load_type_at_offset(
     base: ir::Value,
     offset: i32,
 ) -> ir::Value {
+    // TODO FITZGEN: need to add `little` mem flag here if this is a GC ref?
     let ir_ty = value_type(isa, ty);
     pos.ins().load(ir_ty, flags, base, offset)
 }

@@ -24,7 +24,8 @@ use wasmtime_environ::copying::{
     ALIGN, ARRAY_LENGTH_OFFSET, CopyingTypeLayouts, HEADER_COPIED_BIT,
 };
 use wasmtime_environ::{
-    GcArrayLayout, GcStructLayout, GcTypeLayouts, POISON, VMGcKind, VMSharedTypeIndex, gc_assert,
+    GcArrayLayout, GcStructLayout, GcTypeLayouts, POISON, VMGcKind, VMSharedTypeIndex, endian::Le,
+    gc_assert,
 };
 
 #[expect(clippy::cast_possible_truncation, reason = "known to not overflow")]
@@ -345,6 +346,8 @@ impl CopyingHeap {
     ///
     /// Returns `None` if there isn't enough room.
     fn allocate(&mut self, size: u32) -> Option<u32> {
+        log::trace!("allocating {size:#x} bytes");
+
         debug_assert!(size.is_multiple_of(ALIGN));
         debug_assert!(self.bump_ptr.is_multiple_of(ALIGN));
         debug_assert!(self.bump_ptr >= self.active_space_start);
@@ -353,9 +356,11 @@ impl CopyingHeap {
         let result = self.bump_ptr;
         let new_bump_ptr = result.checked_add(size)?;
         if new_bump_ptr > self.active_space_end {
+            log::trace!("  -> failed");
             return None;
         }
 
+        log::trace!("  -> {result:#010x}");
         self.bump_ptr = new_bump_ptr;
         debug_assert!(self.bump_ptr.is_multiple_of(ALIGN));
         debug_assert!(self.bump_ptr >= self.active_space_start);
@@ -414,6 +419,7 @@ impl CopyingHeap {
 
         let result = self.worklist_ptr;
         let result = NonZeroU32::new(result).unwrap();
+        let result = Le::from_ne(result);
         let result = VMGcRef::from_heap_index(result).unwrap();
 
         let obj_size = self.index(copying_ref(&result)).object_size();
@@ -434,7 +440,7 @@ impl CopyingHeap {
             return;
         }
 
-        let index = gc_ref.as_heap_index().unwrap().get();
+        let index = gc_ref.as_heap_index().unwrap().get_ne().get();
         debug_assert!(self.is_in_active_space(index));
         let obj_size = self.index(copying_ref(gc_ref)).object_size();
         debug_assert_eq!(index + obj_size, self.bump_ptr);
@@ -445,7 +451,7 @@ impl CopyingHeap {
     /// semi-space.
     fn forward(&mut self, from_ref: &VMGcRef) -> VMGcRef {
         debug_assert!(!from_ref.is_i31());
-        debug_assert!(self.is_in_idle_space(from_ref.as_heap_index().unwrap().get()));
+        debug_assert!(self.is_in_idle_space(from_ref.as_heap_index().unwrap().get_ne().get()));
 
         if let Some(to_ref) = self
             .index(header_and_forwarding_ref(from_ref))
@@ -460,7 +466,7 @@ impl CopyingHeap {
     /// new location.
     fn copy(&mut self, from_ref: &VMGcRef) -> VMGcRef {
         debug_assert!(!from_ref.is_i31());
-        let from_index = from_ref.as_heap_index().unwrap().get();
+        let from_index = from_ref.as_heap_index().unwrap().get_ne().get();
         debug_assert!(self.is_in_idle_space(from_index));
         debug_assert!(!self.index(copying_ref(from_ref)).copied());
 
@@ -471,12 +477,13 @@ impl CopyingHeap {
         );
         debug_assert!(self.is_in_active_space(to_index));
 
-        let to_ref =
-            VMGcRef::from_heap_index(NonZeroU32::new(to_index).unwrap()).expect("valid heap index");
+        let to_index = NonZeroU32::new(to_index).unwrap();
+        let to_index = Le::from_ne(to_index);
+        let to_ref = VMGcRef::from_heap_index(to_index).expect("valid heap index");
 
         // Copy the object bytes.
         let from_start = usize::try_from(from_index).unwrap();
-        let to_start = usize::try_from(to_index).unwrap();
+        let to_start = usize::try_from(to_index.get_ne().get()).unwrap();
         let size_usize = usize::try_from(size).unwrap();
         self.heap_slice_mut()
             .copy_within(from_start..from_start + size_usize, to_start);
@@ -508,7 +515,7 @@ impl CopyingHeap {
     /// their forwarded locations in the new semi-space.
     fn scan(&mut self, gc_ref: &VMGcRef, trace_infos: &TraceInfos) {
         debug_assert!(!gc_ref.is_i31());
-        let index = gc_ref.as_heap_index().unwrap().get();
+        let index = gc_ref.as_heap_index().unwrap().get_ne().get();
         debug_assert!(self.is_in_active_space(index));
 
         let ty = self.index(copying_ref(gc_ref)).header.ty();
@@ -549,16 +556,16 @@ impl CopyingHeap {
         let raw: [u8; 4] = self.heap_slice()[field_start..field_end]
             .try_into()
             .unwrap();
-        let raw = u32::from_le_bytes(raw);
+        let raw = <Le<u32>>::from_le_bytes(raw);
 
-        if let Some(child) = VMGcRef::from_raw_ne_u32(raw)
+        if let Some(child) = VMGcRef::from_raw_u32(raw)
             && !child.is_i31()
         {
-            debug_assert!(self.is_in_idle_space(child.as_heap_index().unwrap().get()));
+            debug_assert!(self.is_in_idle_space(child.as_heap_index().unwrap().get_ne().get()));
             let new_ref = self.forward(&child);
-            debug_assert!(self.is_in_active_space(new_ref.as_heap_index().unwrap().get()));
+            debug_assert!(self.is_in_active_space(new_ref.as_heap_index().unwrap().get_ne().get()));
             // Write the new reference back.
-            let new_raw = new_ref.as_raw_ne_u32().to_le_bytes();
+            let new_raw = new_ref.as_raw_u32().to_le_bytes();
             self.heap_slice_mut()[field_start..field_end].copy_from_slice(&new_raw);
         }
     }
@@ -713,6 +720,7 @@ unsafe impl GcHeap for CopyingHeap {
     }
 
     fn alloc_raw(&mut self, header: VMGcHeader, layout: Layout) -> Result<Result<VMGcRef, u64>> {
+        log::trace!("alloc_raw(header = {header:?}, layout = {layout:?})");
         let align = u32::try_from(layout.align()).unwrap();
         ensure!(
             align == ALIGN,
@@ -741,14 +749,16 @@ unsafe impl GcHeap for CopyingHeap {
             None => return Ok(Err(u64::try_from(layout.size()).unwrap())),
             Some(index) => {
                 debug_assert_ne!(index, 0, "index 0 is reserved; bump_ptr should skip it");
-                VMGcRef::from_heap_index(NonZeroU32::new(index).unwrap()).unwrap()
+                let index = NonZeroU32::new(index).unwrap();
+                let index = Le::from_ne(index);
+                VMGcRef::from_heap_index(index).unwrap()
             }
         };
 
         // Assert that the newly-allocated memory is still filled with the
         // poison pattern.
         if cfg!(gc_zeal) {
-            let start = usize::try_from(gc_ref.as_heap_index().unwrap().get()).unwrap();
+            let start = usize::try_from(gc_ref.as_heap_index().unwrap().get_ne().get()).unwrap();
             let slice = &self.heap_slice()[start..][..layout.size()];
             gc_assert!(
                 slice.iter().all(|&b| b == POISON),
@@ -916,8 +926,13 @@ impl CopyingCollection<'_> {
             if gc_ref.is_i31() {
                 continue;
             }
-            let old_index = gc_ref.as_heap_index().unwrap().get();
-            debug_assert!(self.heap.is_in_idle_space(old_index));
+            let old_index = gc_ref.as_heap_index().unwrap().get_ne().get();
+            debug_assert!(
+                self.heap.is_in_idle_space(old_index),
+                "gc root should be in idle space: {:#010x} <= {old_index:#010x} < {:#010x}",
+                self.heap.idle_space_start,
+                self.heap.idle_space_end
+            );
             let new_ref = self.heap.forward(&gc_ref);
             root.set(new_ref);
         }
@@ -931,7 +946,7 @@ impl CopyingCollection<'_> {
         while let Some(gc_ref) = self.heap.worklist_pop() {
             debug_assert!(
                 self.heap
-                    .is_in_active_space(gc_ref.as_heap_index().unwrap().get())
+                    .is_in_active_space(gc_ref.as_heap_index().unwrap().get_ne().get())
             );
             self.heap.scan(&gc_ref, &trace_infos);
         }
@@ -948,7 +963,7 @@ impl CopyingCollection<'_> {
             let gc_ref = externref.as_gc_ref();
             debug_assert!(
                 self.heap
-                    .is_in_idle_space(gc_ref.as_heap_index().unwrap().get())
+                    .is_in_idle_space(gc_ref.as_heap_index().unwrap().get_ne().get())
             );
             let header = self.heap.index(copying_ref(gc_ref));
             if !header.copied() {

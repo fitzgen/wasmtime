@@ -179,6 +179,7 @@ use core::{
     ops::{Deref, DerefMut},
 };
 use wasmtime_core::slab::{Id as SlabId, Slab};
+use wasmtime_environ::endian::Le;
 
 mod sealed {
     use super::*;
@@ -1208,7 +1209,7 @@ impl<T: GcRef> Rooted<T> {
         self,
         store: &mut AutoAssertNoGc<'_>,
         ptr: &mut MaybeUninit<ValRaw>,
-        val_raw: impl Fn(u32) -> ValRaw,
+        val_raw: impl Fn(Le<u32>) -> ValRaw,
     ) -> Result<()> {
         let gc_ref = self.inner.try_clone_gc_ref(store)?;
 
@@ -1218,11 +1219,11 @@ impl<T: GcRef> Rooted<T> {
                 // NB: do not force the allocation of a GC heap just because the
                 // program is using `i31ref`s.
                 debug_assert!(gc_ref.is_i31());
-                gc_ref.as_raw_ne_non_zero_u32()
+                gc_ref.as_raw_non_zero_u32()
             }
         };
 
-        ptr.write(val_raw(raw.get()));
+        ptr.write(val_raw(raw.into()));
         Ok(())
     }
 
@@ -1230,11 +1231,11 @@ impl<T: GcRef> Rooted<T> {
     /// `Rooted<T>`s.
     pub(super) fn wasm_ty_load(
         store: &mut AutoAssertNoGc<'_>,
-        raw_gc_ref: u32,
+        raw_gc_ref: Le<u32>,
         from_cloned_gc_ref: impl Fn(&mut AutoAssertNoGc<'_>, VMGcRef) -> Self,
     ) -> Self {
-        debug_assert_ne!(raw_gc_ref, 0);
-        let gc_ref = VMGcRef::from_raw_ne_u32(raw_gc_ref).expect("non-null");
+        debug_assert_ne!(raw_gc_ref.get_le(), 0);
+        let gc_ref = VMGcRef::from_raw_u32(raw_gc_ref).expect("non-null");
 
         let gc_ref = match store.optional_gc_store_mut() {
             Some(s) => s.clone_gc_ref(&gc_ref),
@@ -1255,12 +1256,12 @@ impl<T: GcRef> Rooted<T> {
         me: Option<Self>,
         store: &mut AutoAssertNoGc<'_>,
         ptr: &mut MaybeUninit<ValRaw>,
-        val_raw: impl Fn(u32) -> ValRaw,
+        val_raw: impl Fn(Le<u32>) -> ValRaw,
     ) -> Result<()> {
         match me {
             Some(me) => me.wasm_ty_store(store, ptr, val_raw),
             None => {
-                ptr.write(val_raw(0));
+                ptr.write(val_raw(Le::from_le(0)));
                 Ok(())
             }
         }
@@ -1270,10 +1271,10 @@ impl<T: GcRef> Rooted<T> {
     /// `Option<Rooted<T>>`s.
     pub(super) fn wasm_ty_option_load(
         store: &mut AutoAssertNoGc<'_>,
-        raw_gc_ref: u32,
+        raw_gc_ref: Le<u32>,
         from_cloned_gc_ref: impl Fn(&mut AutoAssertNoGc<'_>, VMGcRef) -> Self,
     ) -> Option<Self> {
-        let gc_ref = VMGcRef::from_raw_ne_u32(raw_gc_ref)?;
+        let gc_ref = VMGcRef::from_raw_u32(raw_gc_ref)?;
         let gc_ref = store.clone_gc_ref(&gc_ref);
         Some(from_cloned_gc_ref(store, gc_ref))
     }
@@ -1824,7 +1825,7 @@ where
         self,
         store: &mut AutoAssertNoGc<'_>,
         ptr: &mut MaybeUninit<ValRaw>,
-        val_raw: impl Fn(u32) -> ValRaw,
+        val_raw: impl Fn(Le<u32>) -> ValRaw,
     ) -> Result<()> {
         let gc_ref = self.try_clone_gc_ref(store)?;
 
@@ -1832,11 +1833,11 @@ where
             Some(s) => s.expose_gc_ref_to_wasm(gc_ref),
             None => {
                 debug_assert!(gc_ref.is_i31());
-                gc_ref.as_raw_ne_non_zero_u32()
+                gc_ref.as_raw_non_zero_u32()
             }
         };
 
-        ptr.write(val_raw(raw.get()));
+        ptr.write(val_raw(raw.into()));
         Ok(())
     }
 
@@ -1844,11 +1845,11 @@ where
     /// `OwnedRooted<T>`s.
     pub(super) fn wasm_ty_load(
         store: &mut AutoAssertNoGc<'_>,
-        raw_gc_ref: u32,
+        raw_gc_ref: Le<u32>,
         from_cloned_gc_ref: impl Fn(&mut AutoAssertNoGc<'_>, VMGcRef) -> Rooted<T>,
     ) -> Self {
-        debug_assert_ne!(raw_gc_ref, 0);
-        let gc_ref = VMGcRef::from_raw_ne_u32(raw_gc_ref).expect("non-null");
+        debug_assert_ne!(raw_gc_ref.get_le(), 0);
+        let gc_ref = VMGcRef::from_raw_u32(raw_gc_ref).expect("non-null");
         let gc_ref = store.clone_gc_ref(&gc_ref);
         RootSet::with_lifo_scope(store, |store| {
             let rooted = from_cloned_gc_ref(store, gc_ref);
@@ -1862,12 +1863,12 @@ where
         me: Option<Self>,
         store: &mut AutoAssertNoGc<'_>,
         ptr: &mut MaybeUninit<ValRaw>,
-        val_raw: impl Fn(u32) -> ValRaw,
+        val_raw: impl Fn(Le<u32>) -> ValRaw,
     ) -> Result<()> {
         match me {
             Some(me) => me.wasm_ty_store(store, ptr, val_raw),
             None => {
-                ptr.write(val_raw(0));
+                ptr.write(val_raw(Le::from_le(0)));
                 Ok(())
             }
         }
@@ -1877,10 +1878,10 @@ where
     /// `Option<OwnedRooted<T>>`s.
     pub(super) fn wasm_ty_option_load(
         store: &mut AutoAssertNoGc<'_>,
-        raw_gc_ref: u32,
+        raw_gc_ref: Le<u32>,
         from_cloned_gc_ref: impl Fn(&mut AutoAssertNoGc<'_>, VMGcRef) -> Rooted<T>,
     ) -> Option<Self> {
-        let gc_ref = VMGcRef::from_raw_ne_u32(raw_gc_ref)?;
+        let gc_ref = VMGcRef::from_raw_u32(raw_gc_ref)?;
         let gc_ref = store.clone_gc_ref(&gc_ref);
         RootSet::with_lifo_scope(store, |store| {
             let rooted = from_cloned_gc_ref(store, gc_ref);

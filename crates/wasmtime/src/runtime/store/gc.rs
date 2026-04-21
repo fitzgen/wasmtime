@@ -82,7 +82,7 @@ impl StoreOpaque {
         bytes_needed: u64,
         asyncness: Asyncness,
     ) -> Result<()> {
-        log::trace!("Attempting to grow the GC heap by {bytes_needed} bytes");
+        log::trace!("Attempting to grow the GC heap by {bytes_needed:#010x} bytes");
         assert!(bytes_needed > 0);
 
         // If the GC heap needs a collection before growth (e.g. the copying

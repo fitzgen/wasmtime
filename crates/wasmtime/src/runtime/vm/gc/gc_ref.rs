@@ -4,7 +4,10 @@ use core::fmt;
 use core::marker;
 use core::num::NonZeroU32;
 use wasmtime_environ::packed_option::ReservedValue;
-use wasmtime_environ::{VMGcKind, VMSharedTypeIndex};
+use wasmtime_environ::{
+    VMGcKind, VMSharedTypeIndex,
+    endian::{Le, Ne},
+};
 
 /// The common header for all objects allocated in a GC heap.
 ///
@@ -117,81 +120,41 @@ impl VMGcHeader {
     }
 }
 
-// NB: define `VMGcRef` in its own module to limit accidentally using its inner
-// value directly, instead of via the methods that convert between little- and
-// native-endian for you.
-pub use vmgcref::VMGcRef;
-mod vmgcref {
-    use super::*;
-
-    /// A raw, unrooted GC reference.
-    ///
-    /// A `VMGcRef` is either:
-    ///
-    /// * A reference to some kind of object on the GC heap, but we don't know
-    ///   exactly which kind without further reflection. Furthermore, this is
-    ///   not actually a pointer, but a compact index into a Wasm GC heap.
-    ///
-    /// * An `i31ref`: it doesn't actually reference an object in the GC heap,
-    ///   but is instead an inline, unboxed 31-bit integer.
-    ///
-    /// ## `VMGcRef` and GC Barriers
-    ///
-    /// Depending on the garbage collector in use, cloning, writing, and
-    /// dropping a `VMGcRef` may require invoking GC barriers (little snippets
-    /// of code provided by the collector to ensure it is correctly tracking all
-    /// GC references).
-    ///
-    /// Therefore, to encourage correct usage of GC barriers, this type does
-    /// *NOT* implement `Clone` or `Copy`. Use `GcStore::clone_gc_ref`,
-    /// `GcStore::write_gc_ref`, and `GcStore::drop_gc_ref` to clone, write, and
-    /// drop `VMGcRef`s respectively.
-    ///
-    /// As an escape hatch, if you really need to copy a `VMGcRef` without
-    /// invoking GC barriers and you understand why that will not lead to GC
-    /// bugs in this particular case, you can use the `unchecked_copy` method.
-    ///
-    /// # Endianness
-    ///
-    /// `VMGcRef` is always stored little endian internally.
-    ///
-    /// Its accessors return native-endian data.
-    #[derive(Debug, PartialEq, Eq, Hash)]
-    #[repr(transparent)]
-    pub struct VMGcRef(NonZeroU32);
-
-    impl VMGcRef {
-        /// Create a new `VMGcRef` from the given raw little-endian value.
-        ///
-        /// Does not discriminate between indices into a GC heap and `i31ref`s.
-        pub fn from_raw_le_non_zero_u32(raw: NonZeroU32) -> Self {
-            VMGcRef(raw)
-        }
-
-        /// Create a new `VMGcRef` from the given raw native-endian value.
-        ///
-        /// Does not discriminate between indices into a GC heap and `i31ref`s.
-        pub fn from_raw_ne_non_zero_u32(raw: NonZeroU32) -> Self {
-            let le = raw.get().to_le();
-            let le = NonZeroU32::new(le).unwrap();
-            VMGcRef(le)
-        }
-
-        /// Get this GC reference as a raw, little-endian, non-zero u32 value,
-        /// regardless whether it is actually a reference to a GC object or is
-        /// an `i31ref`.
-        pub fn as_raw_le_non_zero_u32(&self) -> NonZeroU32 {
-            self.0
-        }
-
-        /// Get this GC reference as a raw, native-endian u32 value, regardless
-        /// whether it is actually a reference to a GC object or is an `i31ref`.
-        pub fn as_raw_ne_u32(&self) -> u32 {
-            let le = self.0.get();
-            u32::from_le(le)
-        }
-    }
-}
+/// A raw, unrooted GC reference.
+///
+/// A `VMGcRef` is either:
+///
+/// * A reference to some kind of object on the GC heap, but we don't know
+///   exactly which kind without further reflection. Furthermore, this is
+///   not actually a pointer, but a compact index into a Wasm GC heap.
+///
+/// * An `i31ref`: it doesn't actually reference an object in the GC heap,
+///   but is instead an inline, unboxed 31-bit integer.
+///
+/// ## `VMGcRef` and GC Barriers
+///
+/// Depending on the garbage collector in use, cloning, writing, and
+/// dropping a `VMGcRef` may require invoking GC barriers (little snippets
+/// of code provided by the collector to ensure it is correctly tracking all
+/// GC references).
+///
+/// Therefore, to encourage correct usage of GC barriers, this type does
+/// *NOT* implement `Clone` or `Copy`. Use `GcStore::clone_gc_ref`,
+/// `GcStore::write_gc_ref`, and `GcStore::drop_gc_ref` to clone, write, and
+/// drop `VMGcRef`s respectively.
+///
+/// As an escape hatch, if you really need to copy a `VMGcRef` without
+/// invoking GC barriers and you understand why that will not lead to GC
+/// bugs in this particular case, you can use the `unchecked_copy` method.
+///
+/// # Endianness
+///
+/// `VMGcRef` is always stored little endian internally.
+///
+/// Its accessors return native-endian data.
+#[derive(Debug, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct VMGcRef(Le<NonZeroU32>);
 
 impl<T> From<TypedGcRef<T>> for VMGcRef {
     #[inline]
@@ -202,19 +165,19 @@ impl<T> From<TypedGcRef<T>> for VMGcRef {
 
 impl fmt::LowerHex for VMGcRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.as_raw_ne_u32().fmt(f)
+        write!(f, "{:#010x}", self.0)
     }
 }
 
 impl fmt::UpperHex for VMGcRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.as_raw_ne_u32().fmt(f)
+        write!(f, "{:#010X}", self.0)
     }
 }
 
 impl fmt::Pointer for VMGcRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{self:#x}")
+        write!(f, "{:#010x}", self.0)
     }
 }
 
@@ -225,6 +188,13 @@ impl VMGcRef {
     /// Must be kept in sync with `wasmtime_cranelift::I31_REF_DISCRIMINANT`.
     pub const I31_REF_DISCRIMINANT: u32 = 1;
 
+    /// Create a new `VMGcRef` from the given raw little-endian value.
+    ///
+    /// Does not discriminate between indices into a GC heap and `i31ref`s.
+    pub fn from_raw_non_zero_u32(raw: Le<NonZeroU32>) -> Self {
+        VMGcRef(raw)
+    }
+
     /// Create a new `VMGcRef` from the given raw little-endian u32 value.
     ///
     /// Does not discriminate between indices into a GC heap and `i31ref`s.
@@ -234,21 +204,8 @@ impl VMGcRef {
     /// The given index should point to a valid GC-managed object within this
     /// reference's associated heap. Failure to uphold this will be memory safe,
     /// but will lead to general failures such as panics or incorrect results.
-    pub fn from_raw_le_u32(raw: u32) -> Option<Self> {
-        Some(Self::from_raw_ne_non_zero_u32(NonZeroU32::new(raw)?))
-    }
-
-    /// Create a new `VMGcRef` from the given raw native-endian u32 value.
-    ///
-    /// Does not discriminate between indices into a GC heap and `i31ref`s.
-    ///
-    /// Returns `None` for zero values.
-    ///
-    /// The given index should point to a valid GC-managed object within this
-    /// reference's associated heap. Failure to uphold this will be memory safe,
-    /// but will lead to general failures such as panics or incorrect results.
-    pub fn from_raw_ne_u32(raw: u32) -> Option<Self> {
-        Some(Self::from_raw_ne_non_zero_u32(NonZeroU32::new(raw)?))
+    pub fn from_raw_u32(raw: Le<u32>) -> Option<Self> {
+        raw.try_into().ok().map(Self)
     }
 
     /// Create a new `VMGcRef` from the given (native-endian) index into a GC
@@ -260,9 +217,9 @@ impl VMGcRef {
     ///
     /// Returns `None` when the index is not 2-byte aligned and therefore
     /// conflicts with the `i31ref` discriminant.
-    pub fn from_heap_index(index: NonZeroU32) -> Option<Self> {
-        if (index.get() & Self::I31_REF_DISCRIMINANT) == 0 {
-            Some(Self::from_raw_ne_non_zero_u32(index))
+    pub fn from_heap_index(index: Le<NonZeroU32>) -> Option<Self> {
+        if (index.get_ne().get() & Self::I31_REF_DISCRIMINANT) == 0 {
+            Some(Self(index))
         } else {
             None
         }
@@ -273,8 +230,9 @@ impl VMGcRef {
     pub fn from_i31(val: I31) -> Self {
         let val = (val.get_u32() << 1) | Self::I31_REF_DISCRIMINANT;
         debug_assert_ne!(val, 0);
-        let non_zero = unsafe { NonZeroU32::new_unchecked(val) };
-        VMGcRef::from_raw_ne_non_zero_u32(non_zero)
+        let non_zero = NonZeroU32::new(val).unwrap();
+        let non_zero = Ne::from_ne(non_zero);
+        Self(non_zero.into())
     }
 
     /// Copy this `VMGcRef` without running the GC's clone barriers.
@@ -286,7 +244,7 @@ impl VMGcRef {
     /// lead to leaks, panics, and wrong results. It cannot lead to memory
     /// unsafety, however.
     pub fn unchecked_copy(&self) -> Self {
-        Self::from_raw_ne_non_zero_u32(self.as_raw_ne_non_zero_u32())
+        Self(self.0)
     }
 
     /// Copy this `i31` GC reference, which never requires any GC barriers.
@@ -300,25 +258,32 @@ impl VMGcRef {
     /// Get this GC reference as a u32 index into its GC heap.
     ///
     /// Returns `None` for `i31ref`s.
-    pub fn as_heap_index(&self) -> Option<NonZeroU32> {
+    pub fn as_heap_index(&self) -> Option<Ne<NonZeroU32>> {
         if self.is_i31() {
             None
         } else {
-            Some(self.as_raw_ne_non_zero_u32())
+            Some(self.0.into())
         }
     }
 
-    /// Get this GC reference as a raw, native-endian u32 value, regardless
+    /// Get this GC reference as a raw, little-endian, non-zero u32 value,
+    /// regardless whether it is actually a reference to a GC object or is
+    /// an `i31ref`.
+    pub fn as_raw_le_non_zero_u32(&self) -> Le<NonZeroU32> {
+        self.0
+    }
+
+    /// Get this GC reference as a raw, litle-endian u32 value, regardless
     /// whether it is actually a reference to a GC object or is an `i31ref`.
-    pub fn as_raw_le_u32(&self) -> u32 {
-        self.as_raw_le_non_zero_u32().get()
+    pub fn as_raw_u32(&self) -> Le<u32> {
+        self.0.into()
     }
 
     /// Get this GC reference as a raw, native-endian, non-zero u32 value,
     /// regardless whether it is actually a reference to a GC object or is an
     /// `i31ref`.
-    pub fn as_raw_ne_non_zero_u32(&self) -> NonZeroU32 {
-        NonZeroU32::new(self.as_raw_ne_u32()).unwrap()
+    pub fn as_raw_non_zero_u32(&self) -> Le<NonZeroU32> {
+        self.0
     }
 
     /// Creates a typed GC reference from `self`, checking that `self` actually
@@ -435,7 +400,7 @@ impl VMGcRef {
     /// GC reference?
     #[inline]
     pub fn is_i31(&self) -> bool {
-        let val = self.as_raw_ne_u32();
+        let val = self.as_raw_u32().get_ne();
         (val & Self::I31_REF_DISCRIMINANT) != 0
     }
 
@@ -443,7 +408,7 @@ impl VMGcRef {
     #[inline]
     pub fn as_i31(&self) -> Option<I31> {
         if self.is_i31() {
-            let val = self.as_raw_ne_u32() >> 1;
+            let val = self.as_raw_u32().get_ne() >> 1;
             Some(I31::wrapping_u32(val))
         } else {
             None

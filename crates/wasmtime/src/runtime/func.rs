@@ -1104,10 +1104,9 @@ impl Func {
 
         self.call_impl_check_args(&mut store, params, results)?;
 
-        let result = store
+        store
             .on_fiber(|store| unsafe { self.call_impl_do_call(store, params, results) })
-            .await??;
-        Ok(result)
+            .await?
     }
 
     /// Perform dynamic checks that the arguments given to us match
@@ -1182,6 +1181,7 @@ impl Func {
         }
 
         for ((i, slot), val) in results.iter_mut().enumerate().zip(&values_vec) {
+            dbg!("FITZGEN:", unsafe { *val });
             let ty = ty.results().nth(i).unwrap();
             *slot = unsafe { Val::from_raw(&mut *store, *val, ty) };
         }
