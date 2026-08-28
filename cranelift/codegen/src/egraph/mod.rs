@@ -1,7 +1,7 @@
 //! Support for egraphs represented in the DataFlowGraph.
 
 use crate::FxHashSet;
-use crate::alias_analysis::{AliasAnalysis, LastStores, OptResult};
+use crate::alias_analysis::{AliasAnalysis, MemoryState, OptResult};
 use crate::branch_to_trap::BranchToTrapAnalysis;
 use crate::ctxhash::{CtxEq, CtxHash, NullCtx};
 use crate::cursor::{Cursor, CursorPosition, FuncCursor};
@@ -155,7 +155,7 @@ where
     /// build a post-dominator tree for dead-store elimination.
     cfg: &'opt ControlFlowGraph,
     pub(crate) alias_analysis: &'opt mut AliasAnalysis<'analysis>,
-    pub(crate) alias_analysis_state: &'opt mut LastStores,
+    pub(crate) alias_analysis_state: &'opt mut MemoryState,
     pub(crate) branch_to_trap_analysis: &'opt mut BranchToTrapAnalysis,
     ctrl_plane: &'opt mut ControlPlane,
     // Held locally during optimization of one node (recursively):
