@@ -1274,6 +1274,32 @@ pub fn translate_ref_test(
         WasmHeapType::ConcreteArray(ty)
         | WasmHeapType::ConcreteStruct(ty)
         | WasmHeapType::ConcreteExn(ty) => {
+            // An `anyref` can be a host `externref` internalized by
+            // `any.convert_extern`, and such an object's header holds the
+            // reserved type index rather than a real one, so check the object's
+            // kind before reading it.
+            if val_ty.heap_type == WasmHeapType::Any {
+                let expected_kind = match test_ty.heap_type {
+                    WasmHeapType::ConcreteArray(_) => VMGcKind::ArrayRef,
+                    WasmHeapType::ConcreteStruct(_) => VMGcKind::StructRef,
+                    _ => unreachable!(
+                        "checked all of the `any` hierarchy (top, bottom, and i31ref further above)"
+                    ),
+                };
+                let kind_matches = check_header_kind(func_env, builder, val, expected_kind);
+                let kind_matches_block = builder.create_block();
+                let zero = builder.ins().iconst(ir::types::I32, 0);
+                builder.ins().brif(
+                    kind_matches,
+                    kind_matches_block,
+                    &[],
+                    continue_block,
+                    &[zero.into()],
+                );
+                builder.seal_block(kind_matches_block);
+                builder.switch_to_block(kind_matches_block);
+            }
+
             let expected_interned_ty = ty.unwrap_module_type_index();
             let expected_shared_ty =
                 func_env.module_interned_to_shared_ty(&mut builder.cursor(), expected_interned_ty);
