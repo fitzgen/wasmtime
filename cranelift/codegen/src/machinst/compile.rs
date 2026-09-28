@@ -59,6 +59,7 @@ pub fn compile<B: LowerBackend + TargetIsa>(
         }
 
         options.algorithm = match b.flags().regalloc_algorithm() {
+            RegallocAlgorithm::Regicide => Algorithm::Regicide,
             RegallocAlgorithm::Backtracking => Algorithm::Ion,
             RegallocAlgorithm::SinglePass => Algorithm::Fastalloc,
         };

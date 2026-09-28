@@ -929,6 +929,7 @@ impl OptLevel {
 
 #[derive(Arbitrary, Clone, Debug, PartialEq, Eq, Hash)]
 enum RegallocAlgorithm {
+    Regicide,
     Backtracking,
     SinglePass,
 }
@@ -936,6 +937,7 @@ enum RegallocAlgorithm {
 impl RegallocAlgorithm {
     fn to_wasmtime(&self) -> wasmtime::RegallocAlgorithm {
         match self {
+            RegallocAlgorithm::Regicide => wasmtime::RegallocAlgorithm::Regicide,
             RegallocAlgorithm::Backtracking => wasmtime::RegallocAlgorithm::Backtracking,
             RegallocAlgorithm::SinglePass => {
                 const SINGLE_PASS_KNOWN_BUGGY_AT_THIS_TIME: bool = false;

@@ -1668,6 +1668,7 @@ mod tests {
 
         // Regalloc algorithm
         for (regalloc_value, expected) in [
+            ("\"regicide\"", Some(RegallocAlgorithm::Regicide)),
             ("\"backtracking\"", Some(RegallocAlgorithm::Backtracking)),
             ("\"single-pass\"", Some(RegallocAlgorithm::SinglePass)),
             ("\"hello\"", None), // should fail

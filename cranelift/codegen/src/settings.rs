@@ -487,7 +487,7 @@ mod tests {
         let f = Flags::new(b);
         let actual = f.to_string();
         let expected = r#"[shared]
-regalloc_algorithm = "backtracking"
+regalloc_algorithm = "regicide"
 opt_level = "none"
 tls_model = "none"
 stack_switch_model = "none"

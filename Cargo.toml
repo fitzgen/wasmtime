@@ -358,7 +358,7 @@ pulley-interpreter-fuzz = { path = 'pulley/fuzz' }
 
 # Bytecode Alliance maintained dependencies:
 # ---------------------------
-regalloc2 = "0.15.2"
+regalloc2 = { path = "..", features = ["regicide"] }
 wasip1 = { version = "1.0.0", default-features = false }
 
 # cap-std family:

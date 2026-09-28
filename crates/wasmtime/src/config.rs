@@ -1599,7 +1599,7 @@ impl Config {
     /// is) and run-time speed (how fast the generated code runs).
     /// For more information see the documentation of [`RegallocAlgorithm`].
     ///
-    /// The default value for this is `RegallocAlgorithm::Backtracking`.
+    /// The default value for this is `RegallocAlgorithm::Regicide`.
     ///
     /// # Panics
     ///
@@ -1607,6 +1607,7 @@ impl Config {
     #[cfg(any(feature = "cranelift", feature = "winch"))]
     pub fn cranelift_regalloc_algorithm(&mut self, algo: RegallocAlgorithm) -> &mut Self {
         let val = match algo {
+            RegallocAlgorithm::Regicide => "regicide",
             RegallocAlgorithm::Backtracking => "backtracking",
             RegallocAlgorithm::SinglePass => "single_pass",
         };
@@ -3732,6 +3733,16 @@ pub enum OptLevel {
 #[non_exhaustive]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum RegallocAlgorithm {
+    /// Balances compile time against the quality of the generated code.
+    ///
+    /// This algorithm uses second-chance binpacking, assigning registers in a
+    /// single forward pass and evicting an earlier assignment when a later
+    /// one needs the register more. It reconsiders earlier decisions, like
+    /// [`RegallocAlgorithm::Backtracking`] does, but bounds how much work
+    /// that reconsideration can cost.
+    ///
+    /// This is the default.
+    Regicide,
     /// Generates the fastest possible code, but may take longer.
     ///
     /// This algorithm performs "backtracking", which means that it may
@@ -4948,6 +4959,7 @@ impl Engine {
                 return None;
             };
             return match &opt[..] {
+                "regicide" => Some(RegallocAlgorithm::Regicide),
                 "backtracking" => Some(RegallocAlgorithm::Backtracking),
                 "single_pass" => Some(RegallocAlgorithm::SinglePass),
                 _ => None,

@@ -104,9 +104,19 @@ typedef uint8_t wasmtime_regalloc_algorithm_t;
 /**
  * \brief Different ways to allocate registers.
  *
- * The default is #WASMTIME_REGALLOC_BACKTRACKING.
+ * The default is #WASMTIME_REGALLOC_REGICIDE.
  */
 enum wasmtime_regalloc_algorithm_enum { // RegallocAlgorithm
+  /// Balances compile time against the quality of the generated code.
+  ///
+  /// This algorithm uses second-chance binpacking, assigning registers in a
+  /// single forward pass and evicting an earlier assignment when a later one
+  /// needs the register more. It reconsiders earlier decisions, like
+  /// #WASMTIME_REGALLOC_BACKTRACKING does, but bounds how much work that
+  /// reconsideration can cost.
+  ///
+  /// This is the default.
+  WASMTIME_REGALLOC_REGICIDE,
   /// Generates the fastest possible code, but may take longer.
   ///
   /// This algorithm performs “backtracking”, which means that it may undo
@@ -410,7 +420,7 @@ WASMTIME_CONFIG_PROP(void, cranelift_opt_level, wasmtime_opt_level_t)
  * \brief Configures the regalloc algorithm used by the Cranelift code
  * generator.
  *
- * This setting in #WASMTIME_REGALLOC_BACKTRACKING by default.
+ * This setting in #WASMTIME_REGALLOC_REGICIDE by default.
  */
 WASMTIME_CONFIG_PROP(void, cranelift_regalloc_algorithm,
                      wasmtime_regalloc_algorithm_t)

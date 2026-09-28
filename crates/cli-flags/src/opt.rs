@@ -566,19 +566,23 @@ impl WasmtimeOptionValue for wasmtime::OptLevel {
 }
 
 impl WasmtimeOptionValue for wasmtime::RegallocAlgorithm {
-    const VAL_HELP: &'static str = "=backtracking|single-pass";
+    const VAL_HELP: &'static str = "=regicide|backtracking|single-pass";
     fn parse(val: Option<&str>) -> Result<Self> {
         match String::parse(val)?.as_str() {
+            "regicide" => Ok(wasmtime::RegallocAlgorithm::Regicide),
             "backtracking" => Ok(wasmtime::RegallocAlgorithm::Backtracking),
             "single-pass" => Ok(wasmtime::RegallocAlgorithm::SinglePass),
             other => {
-                bail!("unknown regalloc algorithm`{other}`, only backtracking,single-pass accepted")
+                bail!(
+                    "unknown regalloc algorithm`{other}`, only regicide,backtracking,single-pass accepted"
+                )
             }
         }
     }
 
     fn display(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
+            wasmtime::RegallocAlgorithm::Regicide => f.write_str("regicide"),
             wasmtime::RegallocAlgorithm::Backtracking => f.write_str("backtracking"),
             wasmtime::RegallocAlgorithm::SinglePass => f.write_str("single-pass"),
             _ => unreachable!(),

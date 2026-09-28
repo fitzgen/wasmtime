@@ -50,6 +50,7 @@ pub enum wasmtime_profiling_strategy_t {
 #[repr(u8)]
 #[derive(Clone)]
 pub enum wasmtime_regalloc_algorithm_t {
+    WASMTIME_REGALLOC_REGICIDE,
     WASMTIME_REGALLOC_BACKTRACKING,
     WASMTIME_REGALLOC_SINGLE_PASS,
 }
@@ -226,6 +227,7 @@ pub extern "C" fn wasmtime_config_cranelift_regalloc_algorithm_set(
 ) {
     use wasmtime_regalloc_algorithm_t::*;
     c.config.cranelift_regalloc_algorithm(match algo {
+        WASMTIME_REGALLOC_REGICIDE => RegallocAlgorithm::Regicide,
         WASMTIME_REGALLOC_BACKTRACKING => RegallocAlgorithm::Backtracking,
         WASMTIME_REGALLOC_SINGLE_PASS => RegallocAlgorithm::SinglePass,
     });

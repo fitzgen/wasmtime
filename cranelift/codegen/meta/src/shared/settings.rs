@@ -36,12 +36,15 @@ pub(crate) fn define() -> SettingGroup {
         r#"
             Supported options:
 
+            - `regicide`: A second-chance binpacking allocator; the default.
             - `backtracking`: A backtracking allocator with range splitting; more expensive
                               but generates better code.
             - `single_pass`: A single-pass algorithm that yields quick compilation but
                              results in code with more register spills and moves.
         "#,
-        vec!["backtracking", "single_pass"],
+        // NOTE: the first value listed here is the default, per
+        // `Setting::default_byte`.
+        vec!["regicide", "backtracking", "single_pass"],
     );
 
     settings.add_enum(
