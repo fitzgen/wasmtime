@@ -77,6 +77,11 @@ disas = ["anyhow", "capstone"]
 # Enables detailed logging which can be somewhat expensive.
 trace-log = ["regalloc2/trace-log"]
 
+# Enables capturing the input to the regicide register allocator as JSON, for
+# replaying an allocation outside of Cranelift. Does nothing unless
+# `REGICIDE_DUMP` names a directory to write to.
+regicide-dump = ["regalloc2/regicide-dump"]
+
 # By default, an ISLE term is compiled into a single Rust function, but it can be
 # significantly inefficient for large terms (e.g. `simplify` with hundreds of rules).
 # This is because the generated Rust code for such terms is large, and `rustc` takes quadratically longer to compile huge functions.

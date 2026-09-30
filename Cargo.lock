@@ -3105,6 +3105,7 @@ dependencies = [
  "regicide",
  "rustc-hash",
  "serde",
+ "serde_json",
  "smallvec 1.15.1",
 ]
 
@@ -3168,6 +3169,7 @@ dependencies = [
  "hashbrown 0.17.1",
  "log",
  "rustc-hash",
+ "serde",
 ]
 
 [[package]]

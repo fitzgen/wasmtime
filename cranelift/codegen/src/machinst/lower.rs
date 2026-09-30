@@ -380,6 +380,7 @@ impl<'func, I: VCodeInst> Lower<'func, I> {
     ) -> CodegenResult<Self> {
         let constants = VCodeConstants::with_capacity(f.dfg.constants.len());
         let vcode = VCodeBuilder::new(
+            format!("{}", f.name),
             sigs,
             abi,
             emit_info,

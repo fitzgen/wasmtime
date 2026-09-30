@@ -198,6 +198,12 @@ pub struct VCode<I: VCodeInst> {
     /// Constants.
     pub(crate) constants: VCodeConstants,
 
+    /// What the CLIF function this was lowered from is called.
+    ///
+    /// Diagnostic only: it names this function in a `Debug` rendering and in
+    /// whatever the register allocator reports about it.
+    func_name: String,
+
     /// Value labels for debuginfo attached to vregs.
     debug_value_labels: Vec<(VReg, InsnIndex, InsnIndex, u32)>,
 
@@ -272,6 +278,7 @@ pub enum VCodeBuildDirection {
 impl<I: VCodeInst> VCodeBuilder<I> {
     /// Create a new VCodeBuilder.
     pub fn new(
+        func_name: String,
         sigs: SigSet,
         abi: Callee<I::ABIMachineSpec>,
         emit_info: I::Info,
@@ -281,6 +288,7 @@ impl<I: VCodeInst> VCodeBuilder<I> {
         log2_min_function_alignment: u8,
     ) -> Self {
         let vcode = VCode::new(
+            func_name,
             sigs,
             abi,
             emit_info,
@@ -615,6 +623,7 @@ const NO_INST_OFFSET: CodeOffset = u32::MAX;
 impl<I: VCodeInst> VCode<I> {
     /// New empty VCode.
     fn new(
+        func_name: String,
         sigs: SigSet,
         abi: Callee<I::ABIMachineSpec>,
         emit_info: I::Info,
@@ -649,6 +658,7 @@ impl<I: VCodeInst> VCode<I> {
             abi,
             emit_info,
             constants,
+            func_name,
             debug_value_labels: vec![],
             log2_min_function_alignment,
         }
@@ -1526,6 +1536,10 @@ impl<I: VCodeInst> core::ops::Index<InsnIndex> for VCode<I> {
 }
 
 impl<I: VCodeInst> RegallocFunction for VCode<I> {
+    fn name(&self) -> Option<&str> {
+        Some(&self.func_name)
+    }
+
     fn num_insts(&self) -> usize {
         self.insts.len()
     }
@@ -1634,6 +1648,7 @@ impl<I: VCodeInst> Debug for VRegAllocator<I> {
 impl<I: VCodeInst> fmt::Debug for VCode<I> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "VCode {{")?;
+        writeln!(f, "  Function: {}", self.func_name)?;
         writeln!(f, "  Entry block: {}", self.entry.index())?;
 
         let mut state = Default::default();

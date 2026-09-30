@@ -244,6 +244,10 @@ wmemcheck = [
 # Enables detailed internal compiler logging via WASMTIME_LOG
 trace-log = ["wasmtime-cranelift?/trace-log"]
 
+# Capture the input to the regicide register allocator; see that feature in
+# `cranelift-codegen`.
+regicide-dump = ["wasmtime-cranelift?/regicide-dump"]
+
 # Enables support for demangling WebAssembly function names at runtime in
 # errors such as backtraces.
 demangle = ["wasmtime-environ/demangle"]
