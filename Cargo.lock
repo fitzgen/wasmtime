@@ -3102,10 +3102,10 @@ dependencies = [
  "bumpalo",
  "hashbrown 0.17.1",
  "log",
+ "postcard",
  "regicide",
  "rustc-hash",
  "serde",
- "serde_json",
  "smallvec 1.15.1",
 ]
 
