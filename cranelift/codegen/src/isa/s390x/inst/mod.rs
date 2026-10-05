@@ -1133,6 +1133,21 @@ impl MachInst for Inst {
         }
     }
 
+    fn is_remat_constant(&self) -> bool {
+        // Every single-instruction immediate load. The `CMov*` forms and
+        // `Insert64UImm16Shifted` are excluded: they read the register they
+        // overwrite.
+        matches!(
+            self,
+            &Inst::Mov32Imm { .. }
+                | &Inst::Mov32SImm16 { .. }
+                | &Inst::Mov64SImm16 { .. }
+                | &Inst::Mov64SImm32 { .. }
+                | &Inst::Mov64UImm16Shifted { .. }
+                | &Inst::Mov64UImm32Shifted { .. }
+        )
+    }
+
     fn is_included_in_clobbers(&self) -> bool {
         // We exclude call instructions from the clobber-set when they are calls
         // from caller to callee with the same ABI. Such calls cannot possibly

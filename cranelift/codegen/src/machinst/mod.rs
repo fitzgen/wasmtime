@@ -280,6 +280,26 @@ pub trait MachInst: Clone + Debug {
     /// If this is a simple move, return the (source, destination) tuple of registers.
     fn is_move(&self) -> Option<(Writable<Reg>, Reg)>;
 
+    /// Does this instruction materialize a constant into a register, as one
+    /// machine instruction, reading nothing?
+    ///
+    /// Saying so lets the register allocator drop the value and re-emit this
+    /// instruction later, into whichever register it then chooses. Answering
+    /// `false`, the default, is always safe. An instruction may answer `true`
+    /// only if it:
+    ///
+    /// * assembles to exactly one machine instruction, so check the `emit`
+    ///   arm: a pseudo-instruction can hide a sequence behind a single-`def`
+    ///   operand list;
+    /// * reads no virtual register, so nothing need be live where it is
+    ///   recomputed (a fixed read of a non-allocatable register, such as a
+    ///   zero register, is not a read: the allocator never sees it);
+    /// * defines exactly one register and clobbers nothing;
+    /// * has no side effect, touches no memory, and is not a safepoint.
+    fn is_remat_constant(&self) -> bool {
+        false
+    }
+
     /// Is this a terminator (branch or ret)? If so, return its type
     /// (ret/uncond/cond) and target if applicable.
     fn is_term(&self) -> MachTerminator;

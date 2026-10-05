@@ -999,6 +999,24 @@ impl MachInst for Inst {
         }
     }
 
+    fn is_remat_constant(&self) -> bool {
+        match self {
+            // `movz`/`movn` of a shifted 16-bit immediate.
+            &Inst::MovWide { .. } => true,
+
+            // `orr rd, xzr, #imm`. `rn` is read, so this qualifies only when
+            // it is the zero register, which is not a vreg.
+            &Inst::AluRRImmLogic {
+                alu_op: ALUOp::Orr,
+                rn,
+                ..
+            } => rn == zero_reg(),
+
+            // `MovK` is excluded: it reads the register it updates.
+            _ => false,
+        }
+    }
+
     fn is_included_in_clobbers(&self) -> bool {
         let (caller, callee, is_exception) = match self {
             Inst::Args { .. } => return false,

@@ -741,6 +741,25 @@ impl MachInst for Inst {
         }
     }
 
+    fn is_remat_constant(&self) -> bool {
+        match self {
+            Inst::Lui { .. } | Inst::Fli { .. } => true,
+
+            // `addi rd, zero, imm`. `rs` is read, so this qualifies only
+            // when it is the zero register, which is not a vreg.
+            Inst::AluRRImm12 {
+                alu_op: AluOPRRI::Addi,
+                rs,
+                ..
+            } => *rs == zero_reg(),
+
+            // `LoadInlineConst` is excluded: its operand list is a single
+            // def, but it emits a load, a jump over the pool, and the
+            // constant itself.
+            _ => false,
+        }
+    }
+
     fn is_included_in_clobbers(&self) -> bool {
         match self {
             &Inst::Args { .. } => false,

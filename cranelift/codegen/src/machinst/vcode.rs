@@ -26,8 +26,8 @@ use crate::trace;
 use crate::{LabelValueLoc, ValueLocRange};
 use crate::{machinst::*, trace_log_enabled};
 use regalloc2::{
-    Edit, Function as RegallocFunction, InstOrEdit, InstPosition, InstRange, Operand,
-    OperandConstraint, OperandKind, PRegSet, ProgPoint, RegClass,
+    BlockFrequency, Edit, Function as RegallocFunction, InstOrEdit, InstPosition, InstRange,
+    Operand, OperandConstraint, OperandKind, PRegSet, ProgPoint, RegClass, RematCost,
 };
 
 use crate::HashMap;
@@ -76,6 +76,20 @@ pub type BlockIndex = regalloc2::Block;
 pub trait VCodeInst: MachInst + MachInstEmit {}
 impl<I: MachInst + MachInstEmit> VCodeInst for I {}
 
+/// Where a vreg is defined, as far as rematerialization is concerned.
+///
+/// `allow_multiple_vreg_defs` is true for a `VCode`, so being defined once is
+/// worth recording rather than assuming.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum VRegDef {
+    /// A block parameter, or one of the indices reserved for pinned vregs.
+    NeverDefined,
+    /// Exactly one instruction defines it.
+    DefinedBy(InsnIndex),
+    /// Several do, so there is no one instruction to re-run.
+    DefinedSeveralTimes,
+}
+
 /// A function in "VCode" (virtualized-register code) form, after
 /// lowering.  This is essentially a standard CFG of basic blocks,
 /// where each basic block consists of lowered instructions produced
@@ -91,6 +105,9 @@ impl<I: MachInst + MachInstEmit> VCodeInst for I {}
 pub struct VCode<I: VCodeInst> {
     /// VReg IR-level types.
     vreg_types: Vec<Type>,
+
+    /// Where each vreg is defined, for the rematerialization queries.
+    vreg_defs: Vec<VRegDef>,
 
     /// Lowered machine instructions in order corresponding to the original IR.
     insts: Vec<I>,
@@ -520,6 +537,8 @@ impl<I: VCodeInst> VCodeBuilder<I> {
 
     fn collect_operands(&mut self, vregs: &VRegAllocator<I>) {
         let allocatable = PRegSet::from(self.vcode.abi.machine_env());
+        self.vcode.vreg_defs.clear();
+        let mut prev_ops = 0;
         for (i, insn) in self.vcode.insts.iter_mut().enumerate() {
             // Push operands from the instruction onto the operand list.
             //
@@ -539,6 +558,26 @@ impl<I: VCodeInst> VCodeBuilder<I> {
             insn.get_operands(&mut op_collector);
             let (ops, clobbers) = op_collector.finish();
             self.vcode.operand_ranges.push_end(ops);
+
+            // The one walk that sees every operand after alias resolution,
+            // so the cheapest place to record this. A vreg defined more than
+            // once has no single instruction to re-run, and picking one
+            // arbitrarily would recompute the wrong value.
+            for op in &self.vcode.operands[prev_ops..ops] {
+                if op.kind() == OperandKind::Def {
+                    let vreg = op.vreg().vreg();
+                    if vreg >= self.vcode.vreg_defs.len() {
+                        self.vcode.vreg_defs.resize(vreg + 1, VRegDef::NeverDefined);
+                    }
+                    self.vcode.vreg_defs[vreg] = match self.vcode.vreg_defs[vreg] {
+                        VRegDef::NeverDefined => VRegDef::DefinedBy(InsnIndex::new(i)),
+                        VRegDef::DefinedBy(_) | VRegDef::DefinedSeveralTimes => {
+                            VRegDef::DefinedSeveralTimes
+                        }
+                    };
+                }
+            }
+            prev_ops = ops;
 
             if clobbers != PRegSet::default() {
                 self.vcode.clobbers.insert(InsnIndex::new(i), clobbers);
@@ -635,6 +674,7 @@ impl<I: VCodeInst> VCode<I> {
         VCode {
             sigs,
             vreg_types: vec![],
+            vreg_defs: vec![],
             insts: Vec::with_capacity(10 * n_blocks),
             user_stack_maps: FxHashMap::default(),
             debug_tags: FxHashMap::default(),
@@ -682,8 +722,12 @@ impl<I: VCodeInst> VCode<I> {
         let mut clobbered = PRegSet::default();
         let mut function_calls = FunctionCalls::None;
 
-        // All moves are included in clobbers.
-        for (_, Edit::Move { to, .. }) in &regalloc.edits {
+        // Everything an edit writes is included in clobbers.
+        for (_, edit) in &regalloc.edits {
+            let to = match edit {
+                Edit::Move { to, .. } => to,
+                Edit::Remat { to, .. } => to,
+            };
             if let Some(preg) = to.as_reg() {
                 clobbered.add(preg);
             }
@@ -757,6 +801,21 @@ impl<I: VCodeInst> VCode<I> {
         let mut buffer = MachBuffer::new();
         buffer.set_log2_min_function_alignment(self.log2_min_function_alignment);
         let mut bb_starts: Vec<Option<CodeOffset>> = vec![];
+
+        // Taken before the loop below rewrites instructions in place,
+        // replacing their virtual registers with real ones. A remat must point
+        // the definition at a different register, which it can only do while
+        // that operand is still virtual: `get_operands` does not offer a real
+        // register for rewriting at all.
+        let remat_defs: FxHashMap<InsnIndex, I> = regalloc
+            .edits
+            .iter()
+            .filter_map(|(_, edit)| match edit {
+                Edit::Remat { vreg, .. } => self.remat_def(*vreg),
+                Edit::Move { .. } => None,
+            })
+            .map(|def| (def, self.insts[def.index()].clone()))
+            .collect();
 
         // The first M MachLabels are reserved for block indices.
         buffer.reserve_labels_for_blocks(self.num_blocks());
@@ -1092,6 +1151,37 @@ impl<I: VCodeInst> VCode<I> {
                                 panic!("regalloc2 should have eliminated stack-to-stack moves!");
                             }
                         }
+                    }
+
+                    InstOrEdit::Edit(Edit::Remat { vreg, to }) => {
+                        // Re-emit the defining instruction into the register
+                        // the allocator picked. `remat_def` only accepts an
+                        // instruction whose one operand is this def, so
+                        // redirecting that operand is the whole of it.
+                        let def = self.remat_def(*vreg).expect(
+                            "regalloc2 only rematerializes a vreg we called rematerializable",
+                        );
+                        let to = to
+                            .as_reg()
+                            .expect("a rematerialization writes a register, never a spillslot");
+
+                        let mut remat = remat_defs
+                            .get(&def)
+                            .expect("every rematerialized definition was copied up front")
+                            .clone();
+                        let mut defs = 0;
+                        remat.get_operands(&mut |reg: &mut Reg, _constraint, kind, _pos| {
+                            debug_assert_eq!(kind, OperandKind::Def);
+                            *reg = Reg::from(to);
+                            defs += 1;
+                        });
+                        assert_eq!(
+                            defs, 1,
+                            "a rematerialized instruction must offer exactly its one \
+                             definition for rewriting, or the value would be \
+                             recomputed into the wrong register",
+                        );
+                        do_emit(&remat, &mut disasm, &mut buffer, &mut state);
                     }
                 }
             }
@@ -1521,6 +1611,27 @@ impl<I: VCodeInst> VCode<I> {
         self.block_order.lowered_order()[block.index()].orig_block()
     }
 
+    /// The instruction to re-execute to recompute `vreg`, if the allocator
+    /// may rematerialize it.
+    ///
+    /// Requires `MachInst::is_remat_constant` plus a single operand, which is
+    /// the def. Checking that second condition here, rather than trusting the
+    /// backend, keeps an over-generous predicate from costing correctness.
+    fn remat_def(&self, vreg: VReg) -> Option<InsnIndex> {
+        let VRegDef::DefinedBy(inst) = *self.vreg_defs.get(vreg.vreg())? else {
+            return None;
+        };
+        if !self.insts[inst.index()].is_remat_constant() {
+            return None;
+        }
+        // One operand, the def: the instruction reads nothing.
+        let operands = &self.operands[self.operand_ranges.get(inst.index())];
+        match operands {
+            [op] if op.kind() == OperandKind::Def && op.vreg() == vreg => Some(inst),
+            _ => None,
+        }
+    }
+
     /// Get the user stack map associated with the given forward instruction index.
     pub fn get_user_stack_map(&self, inst: InsnIndex) -> Option<&ir::UserStackMap> {
         let index = inst.to_backwards_insn_index(self.num_insts());
@@ -1578,6 +1689,19 @@ impl<I: VCodeInst> RegallocFunction for VCode<I> {
         &self.block_params[range]
     }
 
+    fn block_frequency(&self, block: BlockIndex) -> BlockFrequency {
+        // Cranelift has no profile data, but it knows which blocks are cold
+        // and already sinks them past the end of the function; telling the
+        // allocator keeps a value out of a register only a cold block wants.
+        // Everything else is `NORMAL`: calling a block hot without a profile
+        // would just move the guesswork around.
+        if self.block_order.is_cold(block) {
+            BlockFrequency::COLD
+        } else {
+            BlockFrequency::NORMAL
+        }
+    }
+
     fn branch_blockparams(&self, block: BlockIndex, _insn: InsnIndex, succ_idx: usize) -> &[VReg] {
         let succ_range = self.branch_block_arg_succ_range.get(block.index());
         debug_assert!(succ_idx < succ_range.len());
@@ -1612,6 +1736,16 @@ impl<I: VCodeInst> RegallocFunction for VCode<I> {
 
     fn num_vregs(&self) -> usize {
         self.vreg_types.len()
+    }
+
+    fn is_rematerializable(&self, vreg: VReg) -> Option<RematCost> {
+        self.remat_def(vreg)?;
+        // Recomputing a constant beats reloading it: both are one
+        // instruction, but the remat needs no spill slot and no stack
+        // traffic. It does not beat a register-to-register move of a copy
+        // that is already live, which is what `CheaperThanReload` says and
+        // what `AlwaysRemat` would wrongly deny.
+        Some(RematCost::CheaperThanReload)
     }
 
     fn debug_value_labels(&self) -> &[(VReg, InsnIndex, InsnIndex, u32)] {

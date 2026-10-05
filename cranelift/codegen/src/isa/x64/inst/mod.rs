@@ -1295,6 +1295,19 @@ impl MachInst for Inst {
         }
     }
 
+    fn is_remat_constant(&self) -> bool {
+        // The three forms `Inst::imm` emits for a GPR constant, each taking
+        // a write-only GPR and an immediate.
+        matches!(
+            self,
+            Self::External {
+                inst: asm::inst::Inst::movl_oi(..)
+                    | asm::inst::Inst::movq_mi_sxl(..)
+                    | asm::inst::Inst::movabsq_oi(..),
+            }
+        )
+    }
+
     fn is_trap(&self) -> bool {
         match self {
             Self::External {
