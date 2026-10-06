@@ -22,8 +22,26 @@ pub fn compile<B: LowerBackend + TargetIsa>(
     sigs: SigSet,
     ctrl_plane: &mut ControlPlane,
 ) -> CodegenResult<VCode<B::MInst>> {
+    let mut options = RegallocOptions::default();
+    options.verbose_log = b.flags().regalloc_verbose_logs();
+
+    if cfg!(debug_assertions) {
+        options.validate_ssa = true;
+    }
+
+    options.algorithm = match b.flags().regalloc_algorithm() {
+        RegallocAlgorithm::Regicide => Algorithm::Regicide,
+        RegallocAlgorithm::Backtracking => Algorithm::Ion,
+        RegallocAlgorithm::SinglePass => Algorithm::Fastalloc,
+    };
+
+    // Leave critical edges for register allocation to split on demand, when
+    // the allocator can say which ones need it.
+    options.allow_critical_edges = options.algorithm.supports_critical_edges();
+
     // Compute lowered block order.
-    let block_order = BlockLoweringOrder::new(f, domtree, ctrl_plane);
+    let block_order =
+        BlockLoweringOrder::new(f, domtree, !options.allow_critical_edges, ctrl_plane);
 
     // Build the lowering context.
     let lower =
@@ -51,19 +69,6 @@ pub fn compile<B: LowerBackend + TargetIsa>(
     // Perform register allocation.
     {
         let _tt = timing::regalloc();
-        let mut options = RegallocOptions::default();
-        options.verbose_log = b.flags().regalloc_verbose_logs();
-
-        if cfg!(debug_assertions) {
-            options.validate_ssa = true;
-        }
-
-        options.algorithm = match b.flags().regalloc_algorithm() {
-            RegallocAlgorithm::Regicide => Algorithm::Regicide,
-            RegallocAlgorithm::Backtracking => Algorithm::Ion,
-            RegallocAlgorithm::SinglePass => Algorithm::Fastalloc,
-        };
-
         regalloc2::run_with_ctx(&vcode, vcode.abi.machine_env(), &options, regalloc_ctx)
             .map_err(|err| {
                 log::error!(

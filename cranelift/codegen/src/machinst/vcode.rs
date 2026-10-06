@@ -90,6 +90,16 @@ enum VRegDef {
     DefinedSeveralTimes,
 }
 
+/// One unit of code `VCode::emit` lays out.
+#[derive(Clone, Copy, Debug)]
+enum EmitItem {
+    /// A block.
+    Block(BlockIndex),
+    /// The `n`th lazily split critical edge, to be split by a block of its
+    /// own; see `BlockLoweringOrder::lazy_edges`.
+    Edge(usize),
+}
+
 /// A function in "VCode" (virtualized-register code) form, after
 /// lowering.  This is essentially a standard CFG of basic blocks,
 /// where each basic block consists of lowered instructions produced
@@ -723,7 +733,9 @@ impl<I: VCodeInst> VCode<I> {
         let mut function_calls = FunctionCalls::None;
 
         // Everything an edit writes is included in clobbers.
-        for (_, edit) in &regalloc.edits {
+        let edits = regalloc.edits.iter().map(|(_, edit)| edit);
+        let edge_edits = regalloc.critical_edge_edits.iter().map(|e| &e.edit);
+        for edit in edits.chain(edge_edits) {
             let to = match edit {
                 Edit::Move { to, .. } => to,
                 Edit::Remat { to, .. } => to,
@@ -810,15 +822,40 @@ impl<I: VCodeInst> VCode<I> {
         let remat_defs: FxHashMap<InsnIndex, I> = regalloc
             .edits
             .iter()
-            .filter_map(|(_, edit)| match edit {
+            .map(|(_, edit)| edit)
+            .chain(regalloc.critical_edge_edits.iter().map(|e| &e.edit))
+            .filter_map(|edit| match edit {
                 Edit::Remat { vreg, .. } => self.remat_def(*vreg),
                 Edit::Move { .. } => None,
             })
             .map(|(def, _)| (def, self.insts[def.index()].clone()))
             .collect();
 
-        // The first M MachLabels are reserved for block indices.
-        buffer.reserve_labels_for_blocks(self.num_blocks());
+        // The first M MachLabels are reserved for block indices, and the next
+        // ones for lazily split critical edges.
+        let lazy_edges = self.block_order.lazy_edges();
+        buffer.reserve_labels_for_blocks(self.num_blocks() + lazy_edges.len());
+
+        // A lazy edge with no edits on it is never split: its label is just
+        // its successor's. Aliased before anything is emitted, so that branch
+        // optimization only ever sees the successor's label.
+        let mut split_edges: SmallVec<[usize; 8]> = smallvec![];
+        for (i, edge) in lazy_edges.iter().enumerate() {
+            let has_edits = regalloc
+                .critical_edge_edits(edge.pred)
+                .iter()
+                .any(|e| e.succ_idx == edge.succ_idx);
+            if has_edits {
+                split_edges.push(i);
+            } else {
+                buffer.alias_label(edge.label, MachLabel::from_block(edge.succ));
+            }
+        }
+        debug_assert!(regalloc.critical_edge_edits.iter().all(|e| {
+            lazy_edges
+                .binary_search_by_key(&(e.block, e.succ_idx), |l| (l.pred, l.succ_idx))
+                .is_ok()
+        }));
 
         // Register all allocated constants with the `MachBuffer` to ensure that
         // any references to the constants during instructions can be handled
@@ -826,14 +863,27 @@ impl<I: VCodeInst> VCode<I> {
         buffer.register_constants(&self.constants);
 
         // Construct the final order we emit code in: cold blocks at the end.
-        let mut final_order: SmallVec<[BlockIndex; 16]> = smallvec![];
-        let mut cold_blocks: SmallVec<[BlockIndex; 16]> = smallvec![];
+        //
+        // A split edge goes right after the block it leaves, unless the edge
+        // is cold and the block is not, the same as an edge block that is
+        // split up front, which is as cold as its successor.
+        let mut final_order: SmallVec<[EmitItem; 16]> = smallvec![];
+        let mut cold_blocks: SmallVec<[EmitItem; 16]> = smallvec![];
+        let mut split_edges = split_edges.iter().copied().peekable();
         for block in 0..self.num_blocks() {
             let block = BlockIndex::new(block);
-            if self.block_order.is_cold(block) {
-                cold_blocks.push(block);
+            let block_is_cold = self.block_order.is_cold(block);
+            if block_is_cold {
+                cold_blocks.push(EmitItem::Block(block));
             } else {
-                final_order.push(block);
+                final_order.push(EmitItem::Block(block));
+            }
+            while let Some(i) = split_edges.next_if(|&i| lazy_edges[i].pred == block) {
+                if block_is_cold || self.block_order.is_cold(lazy_edges[i].succ) {
+                    cold_blocks.push(EmitItem::Edge(i));
+                } else {
+                    final_order.push(EmitItem::Edge(i));
+                }
             }
         }
         final_order.extend(cold_blocks.clone());
@@ -889,8 +939,8 @@ impl<I: VCodeInst> VCode<I> {
         };
         let mut total_bb_padding = 0;
 
-        for &block in final_order.iter() {
-            trace!("emitting block {:?}", block);
+        for &item in final_order.iter() {
+            trace!("emitting {:?}", item);
 
             // Call the new block hook for state
             state.on_new_block();
@@ -923,6 +973,36 @@ impl<I: VCodeInst> VCode<I> {
                     I::gen_jump(jump_around).emit(buffer, &self.emit_info, state);
                     buffer.emit_island(0, state.ctrl_plane_mut());
                     buffer.bind_label(jump_around, state.ctrl_plane_mut());
+                }
+            };
+
+            let block = match item {
+                EmitItem::Block(block) => block,
+                EmitItem::Edge(i) => {
+                    // Split the edge: its edits, then on to its successor.
+                    // `bb_starts` and `bb_edges` leave it out, still
+                    // describing the edge as running straight from its
+                    // predecessor to its successor.
+                    let edge = &lazy_edges[i];
+                    buffer.bind_label(edge.label, state.ctrl_plane_mut());
+                    if want_disasm {
+                        writeln!(&mut disasm, "block{}:", edge.label.as_u32()).unwrap();
+                    }
+                    if let Some(block_start) = I::gen_block_start(
+                        self.block_order.is_indirect_branch_target(edge.succ),
+                        is_forward_edge_cfi_enabled,
+                    ) {
+                        do_emit(&block_start, &mut disasm, &mut buffer, &mut state);
+                    }
+                    for e in regalloc.critical_edge_edits(edge.pred) {
+                        if e.succ_idx == edge.succ_idx {
+                            let inst = self.edit_inst(&e.edit, &remat_defs);
+                            do_emit(&inst, &mut disasm, &mut buffer, &mut state);
+                        }
+                    }
+                    let jump = I::gen_jump(MachLabel::from_block(edge.succ));
+                    do_emit(&jump, &mut disasm, &mut buffer, &mut state);
+                    continue;
                 }
             };
 
@@ -1120,68 +1200,9 @@ impl<I: VCodeInst> VCode<I> {
                         }
                     }
 
-                    InstOrEdit::Edit(Edit::Move { from, to }) => {
-                        // Create a move/spill/reload instruction and
-                        // immediately emit it.
-                        match (from.as_reg(), to.as_reg()) {
-                            (Some(from), Some(to)) => {
-                                // Reg-to-reg move.
-                                let from_rreg = Reg::from(from);
-                                let to_rreg = Writable::from_reg(Reg::from(to));
-                                debug_assert_eq!(from.class(), to.class());
-                                let ty = I::canonical_type_for_rc(from.class());
-                                let mv = I::gen_move(to_rreg, from_rreg, ty);
-                                do_emit(&mv, &mut disasm, &mut buffer, &mut state);
-                            }
-                            (Some(from), None) => {
-                                // Spill from register to spillslot.
-                                let to = to.as_stack().unwrap();
-                                let from_rreg = RealReg::from(from);
-                                let spill = self.abi.gen_spill(to, from_rreg);
-                                do_emit(&spill, &mut disasm, &mut buffer, &mut state);
-                            }
-                            (None, Some(to)) => {
-                                // Load from spillslot to register.
-                                let from = from.as_stack().unwrap();
-                                let to_rreg = Writable::from_reg(RealReg::from(to));
-                                let reload = self.abi.gen_reload(to_rreg, from);
-                                do_emit(&reload, &mut disasm, &mut buffer, &mut state);
-                            }
-                            (None, None) => {
-                                panic!("regalloc2 should have eliminated stack-to-stack moves!");
-                            }
-                        }
-                    }
-
-                    InstOrEdit::Edit(Edit::Remat { vreg, to }) => {
-                        // Re-emit the defining instruction into the register
-                        // the allocator picked. `remat_def` only accepts an
-                        // instruction whose one operand is this def, so
-                        // redirecting that operand is the whole of it.
-                        let (def, _) = self.remat_def(*vreg).expect(
-                            "regalloc2 only rematerializes a vreg we called rematerializable",
-                        );
-                        let to = to
-                            .as_reg()
-                            .expect("a rematerialization writes a register, never a spillslot");
-
-                        let mut remat = remat_defs
-                            .get(&def)
-                            .expect("every rematerialized definition was copied up front")
-                            .clone();
-                        let mut defs = 0;
-                        remat.get_operands(&mut |reg: &mut Reg, _constraint, kind, _pos| {
-                            debug_assert_eq!(kind, OperandKind::Def);
-                            *reg = Reg::from(to);
-                            defs += 1;
-                        });
-                        assert_eq!(
-                            defs, 1,
-                            "a rematerialized instruction must offer exactly its one \
-                             definition for rewriting, or the value would be \
-                             recomputed into the wrong register",
-                        );
-                        do_emit(&remat, &mut disasm, &mut buffer, &mut state);
+                    InstOrEdit::Edit(edit) => {
+                        let inst = self.edit_inst(edit, &remat_defs);
+                        do_emit(&inst, &mut disasm, &mut buffer, &mut state);
                     }
                 }
             }
@@ -1617,6 +1638,71 @@ impl<I: VCodeInst> VCode<I> {
     /// Requires `MachInst::remat_cost` plus a single operand, which is the def.
     /// Checking that second condition here, rather than trusting the backend,
     /// keeps an over-generous predicate from costing correctness.
+    /// The instruction that performs a register-allocation edit.
+    ///
+    /// `remat_defs` holds copies of rematerialized definitions taken before
+    /// emission rewrote their operands; see `emit`.
+    fn edit_inst(&self, edit: &Edit, remat_defs: &FxHashMap<InsnIndex, I>) -> I {
+        match *edit {
+            Edit::Move { from, to } => match (from.as_reg(), to.as_reg()) {
+                (Some(from), Some(to)) => {
+                    // Reg-to-reg move.
+                    let from_rreg = Reg::from(from);
+                    let to_rreg = Writable::from_reg(Reg::from(to));
+                    debug_assert_eq!(from.class(), to.class());
+                    let ty = I::canonical_type_for_rc(from.class());
+                    I::gen_move(to_rreg, from_rreg, ty)
+                }
+                (Some(from), None) => {
+                    // Spill from register to spillslot.
+                    let to = to.as_stack().unwrap();
+                    let from_rreg = RealReg::from(from);
+                    self.abi.gen_spill(to, from_rreg)
+                }
+                (None, Some(to)) => {
+                    // Load from spillslot to register.
+                    let from = from.as_stack().unwrap();
+                    let to_rreg = Writable::from_reg(RealReg::from(to));
+                    self.abi.gen_reload(to_rreg, from)
+                }
+                (None, None) => {
+                    panic!("regalloc2 should have eliminated stack-to-stack moves!");
+                }
+            },
+
+            Edit::Remat { vreg, to } => {
+                // Re-emit the defining instruction into the register the
+                // allocator picked. `remat_def` only accepts an instruction
+                // whose one operand is this def, so redirecting that operand is
+                // the whole of it.
+                let (def, _) = self
+                    .remat_def(vreg)
+                    .expect("regalloc2 only rematerializes a vreg we called rematerializable");
+                let to = to
+                    .as_reg()
+                    .expect("a rematerialization writes a register, never a spillslot");
+
+                let mut remat = remat_defs
+                    .get(&def)
+                    .expect("every rematerialized definition was copied up front")
+                    .clone();
+                let mut defs = 0;
+                remat.get_operands(&mut |reg: &mut Reg, _constraint, kind, _pos| {
+                    debug_assert_eq!(kind, OperandKind::Def);
+                    *reg = Reg::from(to);
+                    defs += 1;
+                });
+                assert_eq!(
+                    defs, 1,
+                    "a rematerialized instruction must offer exactly its one \
+                     definition for rewriting, or the value would be \
+                     recomputed into the wrong register",
+                );
+                remat
+            }
+        }
+    }
+
     fn remat_def(&self, vreg: VReg) -> Option<(InsnIndex, RematCost)> {
         let VRegDef::DefinedBy(inst) = *self.vreg_defs.get(vreg.vreg())? else {
             return None;

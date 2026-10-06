@@ -70,12 +70,8 @@ block1:
 ; VCode:
 ; block0:
 ;   clgr %r2, %r3
-;   jge label1 ; jg label2
+;   jge label2 ; jg label3
 ; block1:
-;   jg label3
-; block2:
-;   jg label3
-; block3:
 ;   lghi %r2, 1
 ;   br %r14
 ;

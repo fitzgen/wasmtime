@@ -1171,8 +1171,9 @@ impl<'func, I: VCodeInst> Lower<'func, I> {
         targets: &mut SmallVec<[MachLabel; 2]>,
     ) -> Option<Inst> {
         targets.clear();
-        let (opt_inst, succs) = self.vcode.block_order().succ_indices(bindex);
-        targets.extend(succs.iter().map(|succ| MachLabel::from_block(*succ)));
+        let block_order = self.vcode.block_order();
+        let (opt_inst, _) = block_order.succ_indices(bindex);
+        targets.extend_from_slice(block_order.succ_labels(bindex));
         opt_inst
     }
 
@@ -1363,10 +1364,9 @@ impl<'func, I: VCodeInst> Lower<'func, I> {
             .lowered_index_for_block(block)
             .expect("Unreachable block");
         trace!(" -> lowered block {lowered:?}");
-        let (_, succs) = self.vcode.block_order().succ_indices(lowered);
-        trace!(" -> succs {succs:?}");
-        let succ_block = *succs.get(succ).expect("Successor index out of range");
-        MachLabel::from_block(succ_block)
+        let labels = self.vcode.block_order().succ_labels(lowered);
+        trace!(" -> succ labels {labels:?}");
+        *labels.get(succ).expect("Successor index out of range")
     }
 }
 

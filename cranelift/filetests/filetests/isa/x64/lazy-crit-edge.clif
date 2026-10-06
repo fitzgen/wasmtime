@@ -1,0 +1,197 @@
+test compile precise-output
+test run
+set regalloc_checker=true
+target x86_64
+
+function %crit(i32, i64, i64) -> i64 system_v {
+block0(v0: i32, v1: i64, v2: i64):
+    brif v0, block1, block2(v2, v1)
+
+block1:
+    v3 = iadd v1, v2
+    brif v3, block2(v1, v2), block3
+
+block2(v4: i64, v5: i64):
+    v6 = isub v4, v5
+    return v6
+
+block3:
+    v7 = iconst.i64 99
+    return v7
+}
+
+; VCode:
+;   pushq %rbp
+;   movq %rsp, %rbp
+; block0:
+;   testl %edi, %edi
+;   jnz     label1; j label4
+; block4:
+;   movq %rsi, %rax
+;   movq %rdx, %rsi
+;   movq %rax, %rdx
+;   jmp     label3
+; block1:
+;   leaq (%rsi, %rdx), %rcx
+;   testq %rcx, %rcx
+;   jnz     label5; j label2
+; block2:
+;   movl $0x63, %eax
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq
+; block3:
+;   subq %rdx, %rsi
+;   movq %rsi, %rax
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   pushq %rbp
+;   movq %rsp, %rbp
+; block1: ; offset 0x4
+;   testl %edi, %edi
+;   jne 0x1a
+;   movq %rsi, %rax
+;   movq %rdx, %rsi
+;   movq %rax, %rdx
+;   jmp 0x31
+; block2: ; offset 0x1a
+;   leaq (%rsi, %rdx), %rcx
+;   testq %rcx, %rcx
+;   jne 0x31
+; block3: ; offset 0x27
+;   movl $0x63, %eax
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq
+; block4: ; offset 0x31
+;   subq %rdx, %rsi
+;   movq %rsi, %rax
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq
+
+function %twice(i32, i64, i64) -> i64 system_v {
+block0(v0: i32, v1: i64, v2: i64):
+    brif v0, block1(v1, v2), block1(v2, v1)
+
+block1(v3: i64, v4: i64):
+    v5 = isub v3, v4
+    return v5
+}
+
+; VCode:
+;   pushq %rbp
+;   movq %rsp, %rbp
+; block0:
+;   testl %edi, %edi
+;   jnz     label2; j label3
+; block3:
+;   movq %rsi, %rax
+;   movq %rdx, %rsi
+;   movq %rax, %rdx
+;   jmp     label1
+; block1:
+;   subq %rdx, %rsi
+;   movq %rsi, %rax
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   pushq %rbp
+;   movq %rsp, %rbp
+; block1: ; offset 0x4
+;   testl %edi, %edi
+;   jne 0x15
+;   movq %rsi, %rax
+;   movq %rdx, %rsi
+;   movq %rax, %rdx
+; block2: ; offset 0x15
+;   subq %rdx, %rsi
+;   movq %rsi, %rax
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq
+
+function %table(i32, i64, i64) -> i64 system_v {
+block0(v0: i32, v1: i64, v2: i64):
+    br_table v0, block1(v1, v2), [block1(v2, v1), block2(v1), block1(v1, v1)]
+
+block1(v3: i64, v4: i64):
+    v5 = isub v3, v4
+    return v5
+
+block2(v6: i64):
+    return v6
+}
+
+; VCode:
+;   pushq %rbp
+;   movq %rsp, %rbp
+; block0:
+;   movl $0x3, %ecx
+;   movl %edi, %r8d
+;   cmpl %ecx, %r8d
+;   cmovbl %r8d, %ecx
+;   br_table %rcx, %r8, %rcx
+; block4:
+;   movq %rsi, %rax
+;   movq %rdx, %rsi
+;   movq %rax, %rdx
+;   jmp     label2
+; block5:
+;   movq %rsi, %rdx
+;   jmp     label2
+; block1:
+;   movq %rsi, %rax
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq
+; block2:
+;   subq %rdx, %rsi
+;   movq %rsi, %rax
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   pushq %rbp
+;   movq %rsp, %rbp
+; block1: ; offset 0x4
+;   movl $3, %ecx
+;   movl %edi, %r8d
+;   cmpl %ecx, %r8d
+;   cmovbl %r8d, %ecx
+;   leaq 0xa(%rip), %r8
+;   movslq (%r8, %rcx, 4), %rcx
+;   addq %rcx, %r8
+;   jmpq *%r8
+;   adcb %al, (%rax)
+;   addb %al, (%rax)
+;   addb %al, %es:(%rax)
+;   addb %bl, (%rsi)
+;   addb %al, (%rax)
+;   addb %ch, (%rsi)
+;   addb %al, (%rax)
+;   addb %cl, -0x77(%rax)
+;   .byte 0xf0, 0x48, 0x89, 0xd6, 0x48, 0x89, 0xc2, 0xe9
+;   .byte 0x10, 0x00, 0x00, 0x00, 0x48, 0x89, 0xf2, 0xe9
+;   .byte 0x08, 0x00, 0x00, 0x00
+; block2: ; offset 0x4a
+;   movq %rsi, %rax
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq
+; block3: ; offset 0x52
+;   subq %rdx, %rsi
+;   movq %rsi, %rax
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq
+

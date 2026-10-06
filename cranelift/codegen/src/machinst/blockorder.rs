@@ -59,6 +59,15 @@
 //! Furthermore, the [MachBuffer] machine-code sink performs final peephole-like
 //! branch editing that in practice elides empty blocks and simplifies some of
 //! the other redundancies that this scheme produces.
+//!
+//! # Lazily split critical edges
+//!
+//! When the register allocator can report which critical edges it needs split
+//! (see `regalloc2::Algorithm::supports_critical_edges`), no edge block is
+//! created up front. Instead, each critical edge gets its own [MachLabel],
+//! numbered after the block labels, which the predecessor's branch targets.
+//! Emission then either binds that label to a new block holding the edge's
+//! moves, or aliases it to the successor's label when the edge needs none.
 
 use crate::dominator_tree::DominatorTree;
 use crate::entity::SecondaryMap;
@@ -90,6 +99,25 @@ pub struct BlockLoweringOrder {
     cold_blocks: FxHashSet<BlockIndex>,
     /// Lowered blocks that are indirect branch targets.
     indirect_branch_targets: FxHashSet<BlockIndex>,
+    /// The label each successor in `lowered_succ_indices` is branched to by;
+    /// the successor's own label unless the edge is a lazily split one.
+    lowered_succ_labels: Vec<MachLabel>,
+    /// Every lazily split critical edge, in label order, sorted by
+    /// predecessor. Empty unless critical edges are split lazily.
+    lazy_edges: Vec<LazyEdge>,
+}
+
+/// A critical edge that is split only if register allocation puts edits on it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LazyEdge {
+    /// The block the edge leaves.
+    pub pred: BlockIndex,
+    /// The edge's index among `pred`'s successors.
+    pub succ_idx: u32,
+    /// The block the edge enters.
+    pub succ: BlockIndex,
+    /// The label `pred`'s branch targets for this edge.
+    pub label: MachLabel,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -124,6 +152,14 @@ impl LoweredBlock {
         }
     }
 
+    /// The block a critical edge enters, or the block itself.
+    fn out_edge_block(&self) -> Block {
+        match self {
+            &LoweredBlock::Orig { block } => block,
+            &LoweredBlock::CriticalEdge { succ, .. } => succ,
+        }
+    }
+
     /// The associated in-edge predecessor, if this is a critical edge.
     #[cfg(test)]
     pub fn in_edge(&self) -> Option<Block> {
@@ -145,9 +181,14 @@ impl LoweredBlock {
 
 impl BlockLoweringOrder {
     /// Compute and return a lowered block order for `f`.
+    ///
+    /// With `split_critical_edges`, every critical edge gets a block of its
+    /// own; otherwise each gets a label instead, for emission to split it only
+    /// if it needs to be. See the module docs.
     pub fn new(
         f: &Function,
         domtree: &DominatorTree,
+        split_critical_edges: bool,
         ctrl_plane: &mut ControlPlane,
     ) -> BlockLoweringOrder {
         trace!("BlockLoweringOrder: function body {:?}", f);
@@ -226,7 +267,9 @@ impl BlockLoweringOrder {
                             succ,
                             succ_idx: succ_ix as u32,
                         };
-                        lowered_order.push(*lb);
+                        if split_critical_edges {
+                            lowered_order.push(*lb);
+                        }
                     }
                 }
             }
@@ -243,6 +286,9 @@ impl BlockLoweringOrder {
         // during the creation of `lowering_order`, as we need `lb_to_bindex` to be fully populated
         // first.
         let mut lowered_succ_indices = Vec::new();
+        let mut lowered_succ_labels = Vec::new();
+        let mut lazy_edges = Vec::new();
+        let num_blocks = lowered_order.len();
         let mut cold_blocks = FxHashSet::default();
         let mut indirect_branch_targets = FxHashSet::default();
         let lowered_succ_ranges =
@@ -254,8 +300,31 @@ impl BlockLoweringOrder {
                     // determining the block order already.
                     &LoweredBlock::Orig { block } => {
                         let range = block_succ_range[block].clone();
-                        lowered_succ_indices
-                            .extend(block_succs[range].iter().map(|lb| lb_to_bindex[lb]));
+                        for (succ_idx, lb) in block_succs[range].iter().enumerate() {
+                            match lb_to_bindex.get(lb) {
+                                Some(&succ) => {
+                                    lowered_succ_indices.push(succ);
+                                    lowered_succ_labels.push(MachLabel::from_block(succ));
+                                }
+                                // A critical edge left unsplit.
+                                None => {
+                                    let succ = lb_to_bindex[&LoweredBlock::Orig {
+                                        block: lb.out_edge_block(),
+                                    }];
+                                    let label = MachLabel::from_block(BlockIndex::new(
+                                        num_blocks + lazy_edges.len(),
+                                    ));
+                                    lazy_edges.push(LazyEdge {
+                                        pred: bindex,
+                                        succ_idx: u32::try_from(succ_idx).unwrap(),
+                                        succ,
+                                        label,
+                                    });
+                                    lowered_succ_indices.push(succ);
+                                    lowered_succ_labels.push(label);
+                                }
+                            }
+                        }
 
                         if f.is_effectively_cold(block) {
                             cold_blocks.insert(bindex);
@@ -278,6 +347,7 @@ impl BlockLoweringOrder {
                     &LoweredBlock::CriticalEdge { succ, .. } => {
                         let succ_index = lb_to_bindex[&LoweredBlock::Orig { block: succ }];
                         lowered_succ_indices.push(succ_index);
+                        lowered_succ_labels.push(MachLabel::from_block(succ_index));
 
                         // Edges inherit indirect branch and cold block metadata from their
                         // successor.
@@ -304,6 +374,8 @@ impl BlockLoweringOrder {
             blockindex_by_block,
             cold_blocks,
             indirect_branch_targets,
+            lowered_succ_labels,
+            lazy_edges,
         };
 
         trace!("BlockLoweringOrder: {:#?}", result);
@@ -330,6 +402,19 @@ impl BlockLoweringOrder {
         (*opt_inst, &self.lowered_succ_indices[range.clone()])
     }
 
+    /// Get the labels a lowered block's branch targets, one per successor in
+    /// `succ_indices` order.
+    pub fn succ_labels(&self, block: BlockIndex) -> &[MachLabel] {
+        let (_, range) = &self.lowered_succ_ranges[block.index()];
+        &self.lowered_succ_labels[range.clone()]
+    }
+
+    /// Every lazily split critical edge, sorted by predecessor; see the
+    /// module docs. A lazy edge's label is numbered after every block's.
+    pub fn lazy_edges(&self) -> &[LazyEdge] {
+        &self.lazy_edges
+    }
+
     /// Determine whether the given lowered-block index is cold.
     pub fn is_cold(&self, block: BlockIndex) -> bool {
         self.cold_blocks.contains(&block)
@@ -353,6 +438,14 @@ mod test {
     use crate::isa::CallConv;
 
     fn build_test_func(n_blocks: usize, edges: &[(usize, usize)]) -> BlockLoweringOrder {
+        build_test_func_with(n_blocks, edges, true)
+    }
+
+    fn build_test_func_with(
+        n_blocks: usize,
+        edges: &[(usize, usize)],
+        split_critical_edges: bool,
+    ) -> BlockLoweringOrder {
         assert!(n_blocks > 0);
 
         let name = UserFuncName::testcase("test0");
@@ -395,7 +488,12 @@ mod test {
         cfg.compute(&func);
         let dom_tree = DominatorTree::with_function(&func, &cfg);
 
-        BlockLoweringOrder::new(&func, &dom_tree, &mut Default::default())
+        BlockLoweringOrder::new(
+            &func,
+            &dom_tree,
+            split_critical_edges,
+            &mut Default::default(),
+        )
     }
 
     #[test]
@@ -482,5 +580,59 @@ mod test {
         assert_eq!(order.lowered_order[8].orig_block().unwrap().as_u32(), 5);
         assert!(order.lowered_order[8].in_edge().is_none());
         assert!(order.lowered_order[8].out_edge().is_none());
+    }
+
+    #[test]
+    fn test_blockorder_lazy_critedge() {
+        // The CFG of `test_blockorder_critedge`, whose critical edges are
+        // 3 -> 5 and 3 -> 6.
+        let order = build_test_func_with(
+            7,
+            &[
+                (0, 1),
+                (0, 2),
+                (1, 3),
+                (1, 4),
+                (2, 5),
+                (3, 5),
+                (3, 6),
+                (4, 6),
+            ],
+            false,
+        );
+
+        assert_eq!(order.lowered_order.len(), 7);
+        assert!(
+            order
+                .lowered_order
+                .iter()
+                .all(|lb| lb.orig_block().is_some())
+        );
+
+        let bindex = |b: u32| order.lowered_index_for_block(Block::from_u32(b)).unwrap();
+        let three = bindex(3);
+        let edges = order.lazy_edges();
+        assert_eq!(edges.len(), 2);
+        for (i, edge) in edges.iter().enumerate() {
+            assert_eq!(edge.pred, three);
+            assert_eq!(edge.succ_idx, i as u32);
+            assert_eq!(edge.label, MachLabel::from_block(BlockIndex::new(7 + i)));
+        }
+        assert_eq!(edges[0].succ, bindex(5));
+        assert_eq!(edges[1].succ, bindex(6));
+
+        // Block 3 branches to its successors' blocks, but by the edges' labels.
+        assert_eq!(order.succ_indices(three).1, &[bindex(5), bindex(6)]);
+        assert_eq!(order.succ_labels(three), &[edges[0].label, edges[1].label]);
+
+        // Every other block branches straight to its successors.
+        let zero = bindex(0);
+        assert_eq!(
+            order.succ_labels(zero),
+            &[
+                MachLabel::from_block(bindex(1)),
+                MachLabel::from_block(bindex(2))
+            ]
+        );
     }
 }

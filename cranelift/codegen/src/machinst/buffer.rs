@@ -801,6 +801,27 @@ impl<I: VCodeInst> MachBuffer<I> {
         // Post-invariant: by `optimize_branches()` (see argument there).
     }
 
+    /// Make `label` resolve to wherever `to` does, without binding it.
+    ///
+    /// `label` must be neither bound nor aliased yet, and `to` must not
+    /// already resolve through `label`.
+    pub fn alias_label(&mut self, label: MachLabel, to: MachLabel) {
+        trace!("MachBuffer: alias label {:?} to {:?}", label, to);
+        debug_assert_eq!(self.label_offsets[label.0 as usize], UNKNOWN_LABEL_OFFSET);
+        debug_assert_eq!(self.label_aliases[label.0 as usize], UNKNOWN_LABEL);
+        debug_assert!({
+            let mut l = to;
+            while l != label && self.label_aliases[l.0 as usize] != UNKNOWN_LABEL {
+                l = self.label_aliases[l.0 as usize];
+            }
+            l != label
+        });
+        self.label_aliases[label.0 as usize] = to;
+
+        // Post-invariant: `label` is in no branch's or the tail's label list,
+        // since it was never bound, and the check above rules out a cycle.
+    }
+
     /// Lazily clear `labels_at_tail` if the tail offset has moved beyond the
     /// offset that it applies to.
     fn lazily_clear_labels_at_tail(&mut self) {
