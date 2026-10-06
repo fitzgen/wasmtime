@@ -10,6 +10,7 @@ use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt::Write;
+use regalloc2::RematCost;
 use smallvec::SmallVec;
 pub mod regs;
 pub use self::regs::*;
@@ -1133,19 +1134,23 @@ impl MachInst for Inst {
         }
     }
 
-    fn is_remat_constant(&self) -> bool {
+    fn remat_cost(&self) -> Option<RematCost> {
         // Every single-instruction immediate load. The `CMov*` forms and
         // `Insert64UImm16Shifted` are excluded: they read the register they
         // overwrite.
-        matches!(
-            self,
+        match self {
+            // 4 bytes, the same as `lgr`.
+            &Inst::Mov32SImm16 { .. }
+            | &Inst::Mov64SImm16 { .. }
+            | &Inst::Mov64UImm16Shifted { .. } => Some(RematCost::CheaperThanMove),
+
+            // 6 bytes.
             &Inst::Mov32Imm { .. }
-                | &Inst::Mov32SImm16 { .. }
-                | &Inst::Mov64SImm16 { .. }
-                | &Inst::Mov64SImm32 { .. }
-                | &Inst::Mov64UImm16Shifted { .. }
-                | &Inst::Mov64UImm32Shifted { .. }
-        )
+            | &Inst::Mov64SImm32 { .. }
+            | &Inst::Mov64UImm32Shifted { .. } => Some(RematCost::CheaperThanReload),
+
+            _ => None,
+        }
     }
 
     fn is_included_in_clobbers(&self) -> bool {

@@ -13,6 +13,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt::Write;
 use core::slice;
+use regalloc2::RematCost;
 use smallvec::{SmallVec, smallvec};
 
 pub(crate) mod regs;
@@ -999,10 +1000,11 @@ impl MachInst for Inst {
         }
     }
 
-    fn is_remat_constant(&self) -> bool {
+    fn remat_cost(&self) -> Option<RematCost> {
+        // Every instruction is 4 bytes, the same as a register move.
         match self {
             // `movz`/`movn` of a shifted 16-bit immediate.
-            &Inst::MovWide { .. } => true,
+            &Inst::MovWide { .. } => Some(RematCost::CheaperThanMove),
 
             // `orr rd, xzr, #imm`. `rn` is read, so this qualifies only when
             // it is the zero register, which is not a vreg.
@@ -1010,10 +1012,10 @@ impl MachInst for Inst {
                 alu_op: ALUOp::Orr,
                 rn,
                 ..
-            } => rn == zero_reg(),
+            } if rn == zero_reg() => Some(RematCost::CheaperThanMove),
 
             // `MovK` is excluded: it reads the register it updates.
-            _ => false,
+            _ => None,
         }
     }
 

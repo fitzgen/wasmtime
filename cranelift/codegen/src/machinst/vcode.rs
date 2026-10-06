@@ -814,7 +814,7 @@ impl<I: VCodeInst> VCode<I> {
                 Edit::Remat { vreg, .. } => self.remat_def(*vreg),
                 Edit::Move { .. } => None,
             })
-            .map(|def| (def, self.insts[def.index()].clone()))
+            .map(|(def, _)| (def, self.insts[def.index()].clone()))
             .collect();
 
         // The first M MachLabels are reserved for block indices.
@@ -1158,7 +1158,7 @@ impl<I: VCodeInst> VCode<I> {
                         // the allocator picked. `remat_def` only accepts an
                         // instruction whose one operand is this def, so
                         // redirecting that operand is the whole of it.
-                        let def = self.remat_def(*vreg).expect(
+                        let (def, _) = self.remat_def(*vreg).expect(
                             "regalloc2 only rematerializes a vreg we called rematerializable",
                         );
                         let to = to
@@ -1611,23 +1611,21 @@ impl<I: VCodeInst> VCode<I> {
         self.block_order.lowered_order()[block.index()].orig_block()
     }
 
-    /// The instruction to re-execute to recompute `vreg`, if the allocator
-    /// may rematerialize it.
+    /// The instruction to re-execute to recompute `vreg`, and what that costs,
+    /// if the allocator may rematerialize it.
     ///
-    /// Requires `MachInst::is_remat_constant` plus a single operand, which is
-    /// the def. Checking that second condition here, rather than trusting the
-    /// backend, keeps an over-generous predicate from costing correctness.
-    fn remat_def(&self, vreg: VReg) -> Option<InsnIndex> {
+    /// Requires `MachInst::remat_cost` plus a single operand, which is the def.
+    /// Checking that second condition here, rather than trusting the backend,
+    /// keeps an over-generous predicate from costing correctness.
+    fn remat_def(&self, vreg: VReg) -> Option<(InsnIndex, RematCost)> {
         let VRegDef::DefinedBy(inst) = *self.vreg_defs.get(vreg.vreg())? else {
             return None;
         };
-        if !self.insts[inst.index()].is_remat_constant() {
-            return None;
-        }
+        let cost = self.insts[inst.index()].remat_cost()?;
         // One operand, the def: the instruction reads nothing.
         let operands = &self.operands[self.operand_ranges.get(inst.index())];
         match operands {
-            [op] if op.kind() == OperandKind::Def && op.vreg() == vreg => Some(inst),
+            [op] if op.kind() == OperandKind::Def && op.vreg() == vreg => Some((inst, cost)),
             _ => None,
         }
     }
@@ -1739,13 +1737,7 @@ impl<I: VCodeInst> RegallocFunction for VCode<I> {
     }
 
     fn is_rematerializable(&self, vreg: VReg) -> Option<RematCost> {
-        self.remat_def(vreg)?;
-        // Recomputing a constant beats reloading it: both are one
-        // instruction, but the remat needs no spill slot and no stack
-        // traffic. It does not beat a register-to-register move of a copy
-        // that is already live, which is what `CheaperThanReload` says and
-        // what `AlwaysRemat` would wrongly deny.
-        Some(RematCost::CheaperThanReload)
+        self.remat_def(vreg).map(|(_, cost)| cost)
     }
 
     fn debug_value_labels(&self) -> &[(VReg, InsnIndex, InsnIndex, u32)] {

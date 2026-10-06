@@ -60,7 +60,7 @@ use core::fmt::Debug;
 use core::num::NonZeroU8;
 use cranelift_control::ControlPlane;
 use cranelift_entity::PrimaryMap;
-use regalloc2::VReg;
+use regalloc2::{RematCost, VReg};
 use smallvec::{SmallVec, smallvec};
 
 #[cfg(feature = "enable-serde")]
@@ -280,13 +280,13 @@ pub trait MachInst: Clone + Debug {
     /// If this is a simple move, return the (source, destination) tuple of registers.
     fn is_move(&self) -> Option<(Writable<Reg>, Reg)>;
 
-    /// Does this instruction materialize a constant into a register, as one
-    /// machine instruction, reading nothing?
+    /// If this instruction materializes a constant into a register, as one
+    /// machine instruction reading nothing, what does re-emitting it cost?
     ///
-    /// Saying so lets the register allocator drop the value and re-emit this
-    /// instruction later, into whichever register it then chooses. Answering
-    /// `false`, the default, is always safe. An instruction may answer `true`
-    /// only if it:
+    /// Answering `Some` lets the register allocator drop the value and re-emit
+    /// this instruction later, into whichever register it then chooses.
+    /// Answering `None`, the default, is always safe. An instruction may answer
+    /// `Some` only if it:
     ///
     /// * assembles to exactly one machine instruction, so check the `emit`
     ///   arm: a pseudo-instruction can hide a sequence behind a single-`def`
@@ -296,8 +296,17 @@ pub trait MachInst: Clone + Debug {
     ///   zero register, is not a read: the allocator never sees it);
     /// * defines exactly one register and clobbers nothing;
     /// * has no side effect, touches no memory, and is not a safepoint.
-    fn is_remat_constant(&self) -> bool {
-        false
+    ///
+    /// Answer `RematCost::CheaperThanMove` when its encoding is no longer than
+    /// the register-to-register move `gen_move` emits for its class at
+    /// `canonical_type_for_rc`, since recomputing it then costs no more than
+    /// copying it. Otherwise answer `RematCost::CheaperThanReload`.
+    ///
+    /// TODO: such a constant should answer `RematCost::AlwaysRemat`, but
+    /// regicide currently leaves dead remats of those values in place; see
+    /// `reports/dead-remats.md` in the regalloc2 repository.
+    fn remat_cost(&self) -> Option<RematCost> {
+        None
     }
 
     /// Is this a terminator (branch or ret)? If so, return its type

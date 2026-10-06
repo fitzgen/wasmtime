@@ -17,6 +17,7 @@ use alloc::vec::Vec;
 use core::fmt::{self, Write};
 use core::slice;
 use cranelift_assembler_x64 as asm;
+use regalloc2::RematCost;
 use smallvec::{SmallVec, smallvec};
 
 pub mod args;
@@ -1295,17 +1296,19 @@ impl MachInst for Inst {
         }
     }
 
-    fn is_remat_constant(&self) -> bool {
+    fn remat_cost(&self) -> Option<RematCost> {
         // The three forms `Inst::imm` emits for a GPR constant, each taking
-        // a write-only GPR and an immediate.
-        matches!(
-            self,
+        // a write-only GPR and an immediate. Each is at least 5 bytes, longer
+        // than the 3-byte `movq` between registers.
+        match self {
             Self::External {
-                inst: asm::inst::Inst::movl_oi(..)
+                inst:
+                    asm::inst::Inst::movl_oi(..)
                     | asm::inst::Inst::movq_mi_sxl(..)
                     | asm::inst::Inst::movabsq_oi(..),
-            }
-        )
+            } => Some(RematCost::CheaperThanReload),
+            _ => None,
+        }
     }
 
     fn is_trap(&self) -> bool {

@@ -16,7 +16,7 @@ use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt::Write;
-use regalloc2::RegClass;
+use regalloc2::{RegClass, RematCost};
 use smallvec::{SmallVec, smallvec};
 
 pub mod regs;
@@ -741,22 +741,39 @@ impl MachInst for Inst {
         }
     }
 
-    fn is_remat_constant(&self) -> bool {
+    fn remat_cost(&self) -> Option<RematCost> {
+        // Whether an integer constant is as short as a move depends on Zca,
+        // which is not visible here: with it, `c.mv` is 2 bytes. So only a
+        // constant that fits `c.li` or `c.lui` is `CheaperThanMove`, as that is
+        // no longer than a move with or without Zca.
+        let cost = |compressible: bool| {
+            if compressible {
+                RematCost::CheaperThanMove
+            } else {
+                RematCost::CheaperThanReload
+            }
+        };
         match self {
-            Inst::Lui { .. } | Inst::Fli { .. } => true,
+            Inst::Lui { imm, .. } => Some(cost(
+                imm.as_i32() != 0 && Imm6::maybe_from_i32(imm.as_i32()).is_some(),
+            )),
 
             // `addi rd, zero, imm`. `rs` is read, so this qualifies only
             // when it is the zero register, which is not a vreg.
             Inst::AluRRImm12 {
                 alu_op: AluOPRRI::Addi,
                 rs,
+                imm12,
                 ..
-            } => *rs == zero_reg(),
+            } if *rs == zero_reg() => Some(cost(Imm6::maybe_from_imm12(*imm12).is_some())),
+
+            // 4 bytes, the same as `fsgnj`, which has no compressed form.
+            Inst::Fli { .. } => Some(RematCost::CheaperThanMove),
 
             // `LoadInlineConst` is excluded: its operand list is a single
             // def, but it emits a load, a jump over the pool, and the
             // constant itself.
-            _ => false,
+            _ => None,
         }
     }
 
