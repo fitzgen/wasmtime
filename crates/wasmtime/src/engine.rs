@@ -512,6 +512,7 @@ information about this check\
             | "enable_verifier"
             | "regalloc_checker"
             | "regalloc_verbose_logs"
+            | "regalloc_lazy_critical_edges"
             | "regalloc_algorithm"
             | "is_pic"
             | "bb_padding_log2_minus_one"

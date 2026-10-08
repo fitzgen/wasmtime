@@ -1,6 +1,7 @@
 test compile precise-output
 test run
 set regalloc_checker=true
+set regalloc_lazy_critical_edges=true
 target x86_64
 
 function %crit(i32, i64, i64) -> i64 system_v {

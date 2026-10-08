@@ -30,6 +30,19 @@ pub(crate) fn define() -> SettingGroup {
         false,
     );
 
+    settings.add_bool(
+        "regalloc_lazy_critical_edges",
+        "Split critical edges only where the register allocator needs to.",
+        r#"
+            By default every critical edge is split before register allocation.
+            With this enabled, and with an allocator that supports it (currently
+            only `regicide`), critical edges are left in place and split only
+            when the allocator places moves on them. Ignored by other
+            allocators.
+        "#,
+        false,
+    );
+
     settings.add_enum(
         "regalloc_algorithm",
         "Algorithm to use in register allocator.",

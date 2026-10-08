@@ -36,8 +36,9 @@ pub fn compile<B: LowerBackend + TargetIsa>(
     };
 
     // Leave critical edges for register allocation to split on demand, when
-    // the allocator can say which ones need it.
-    options.allow_critical_edges = options.algorithm.supports_critical_edges();
+    // asked to and the allocator can say which ones need it.
+    options.allow_critical_edges = b.flags().regalloc_lazy_critical_edges()
+        && options.algorithm.supports_critical_edges();
 
     // Compute lowered block order.
     let block_order =

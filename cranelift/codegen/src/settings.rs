@@ -498,6 +498,7 @@ bb_padding_log2_minus_one = 0
 log2_min_function_alignment = 0
 regalloc_checker = false
 regalloc_verbose_logs = false
+regalloc_lazy_critical_edges = false
 enable_alias_analysis = true
 enable_verifier = true
 is_pic = false
