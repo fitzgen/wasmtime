@@ -51,6 +51,24 @@ pub enum FactInlineIntrinsic {
     ExitSyncCall,
     /// `trap`: raise the given trap.
     Trap(Trap),
+
+    /// `resource.transfer-borrow-to-owner`: lend a `borrow` to the instance
+    /// that owns the resource, recording it in the store's `lazy_lenders`
+    /// buffer, without creating a task.
+    ///
+    /// Carries the component instance owning the handle table alongside the
+    /// resource type, since compiled code needs the instance to find the table
+    /// and translation has the types on hand to resolve it.
+    ///
+    /// Falls back to the out-of-line libcall whenever the inline path's guard
+    /// does not hold; see `component_sync_call::transfer_borrow_to_owner`.
+    #[cfg(feature = "component-model")]
+    ResourceTransferBorrowToOwner {
+        /// The resource type of the handle being lent.
+        ty: crate::component::TypeResourceTableIndex,
+        /// The component instance owning `ty`'s handle table.
+        instance: crate::component::RuntimeComponentInstanceIndex,
+    },
 }
 
 /// A statically-known function import.

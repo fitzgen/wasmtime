@@ -705,6 +705,19 @@ impl<'a, 'data> Translator<'a, 'data> {
                                     FactInlineIntrinsic::ExitSyncCall.into()
                                 }
                                 Trampoline::Trap(trap) => FactInlineIntrinsic::Trap(trap).into(),
+                                Trampoline::ResourceTransferBorrowToOwner { ty } => {
+                                    // Resolve the handle table here, where the
+                                    // types are on hand, exactly as
+                                    // `ResourceTables::table_for_index` does
+                                    // at runtime.
+                                    let instance =
+                                        self.types.types()[ty].unwrap_concrete_instance();
+                                    FactInlineIntrinsic::ResourceTransferBorrowToOwner {
+                                        ty,
+                                        instance,
+                                    }
+                                    .into()
+                                }
                                 _ => continue,
                             },
 

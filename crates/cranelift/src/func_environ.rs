@@ -268,10 +268,15 @@ pub struct FuncEnvironment<'module_environment> {
     /// Alias regions for the enclosing component's offsets.
     ///
     /// Present only when this module is being compiled as part of a component.
-    #[allow(
-        dead_code,
-        reason = "read by the fused-adapter fast paths in a follow-up commit"
-    )]
+    ///
+    /// Most of what compiled code reaches in a `VMComponentContext` either
+    /// sits at a pointer-size-derived offset (`may_leave`, via
+    /// `#[ptr_size_offset]`) or arrives as an imported entity whose base
+    /// instantiation fills in. The fused-adapter fast paths are the exception:
+    /// they index `handle_tables`, which sits past the first array in the
+    /// dynamic section and so has no closed-form offset, against the
+    /// `VMComponentContext` that the intrinsic call hands them as its callee
+    /// vmctx.
     pub(crate) component_regions:
         Option<AliasRegions<wasmtime_environ::component::VMComponentOffsets<u8>>>,
 }
@@ -2302,7 +2307,29 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
                             &real_call_args,
                         )));
                     }
+
+                    // Needs an enclosing deferred frame to record the lend
+                    // into; without one, fall through to the libcall.
+                    #[cfg(feature = "component-model")]
+                    FactInlineIntrinsic::ResourceTransferBorrowToOwner { ty, instance }
+                        if self.env.tunables.concurrency_support
+                            && self.env.fact_sync_call_slot.is_some() =>
+                    {
+                        debug_assert!(!self.tail);
+                        return Ok(Reachability::Reachable(
+                            self.lower_fact_resource_transfer_borrow_to_owner(
+                                *ty,
+                                *instance,
+                                callee_index,
+                                sig_ref,
+                                &real_call_args,
+                            ),
+                        ));
+                    }
+
                     FactInlineIntrinsic::EnterSyncCall | FactInlineIntrinsic::ExitSyncCall => {}
+                    #[cfg(feature = "component-model")]
+                    FactInlineIntrinsic::ResourceTransferBorrowToOwner { .. } => {}
                 }
                 let import_off = self.env.offsets.imported_functions().at(callee_index);
                 let func_addr = self
@@ -2377,6 +2404,65 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
         debug_assert!(self.env.fact_sync_call_slot.is_none());
         self.env.fact_sync_call_slot = Some(slot);
         CallRets::new()
+    }
+
+    /// Inline lowering of a FACT adapter's
+    /// `resource.transfer-borrow-to-owner` intrinsic.
+    ///
+    /// `real_call_args` is `[callee_vmctx, caller_vmctx, handle_index]`, where
+    /// `callee_vmctx` is this adapter's `VMComponentContext`. Anything the fast
+    /// path cannot handle falls through to the indirect call; see
+    /// `component_sync_call::transfer_borrow_to_owner`.
+    #[cfg(feature = "component-model")]
+    fn lower_fact_resource_transfer_borrow_to_owner(
+        &mut self,
+        ty: wasmtime_environ::component::TypeResourceTableIndex,
+        instance: wasmtime_environ::component::RuntimeComponentInstanceIndex,
+        callee_index: FuncIndex,
+        sig_ref: ir::SigRef,
+        real_call_args: &[ir::Value],
+    ) -> CallRets {
+        // The lend is recorded into the enclosing deferred frame's region of
+        // the buffer, and that frame's `exit` is what discards it.
+        let slot = self
+            .env
+            .fact_sync_call_slot
+            .expect("inline to-owner borrow without an enclosing enter-sync-call");
+
+        let vmctx = self.env.vmctx_val(&mut self.builder.cursor());
+        let component_regions = self
+            .env
+            .component_regions
+            .as_mut()
+            .expect("an adapter's to-owner borrow requires the component's offsets");
+        let join_block = crate::component_sync_call::transfer_borrow_to_owner(
+            self.builder,
+            component_regions,
+            vmctx,
+            real_call_args[0],
+            slot,
+            ty,
+            instance,
+            real_call_args[2],
+        );
+
+        // Slow path.
+        let import_off = self.env.offsets.imported_functions().at(callee_index);
+        let func_addr = self
+            .env
+            .alias_regions
+            .vm_function_import()
+            .wasm_call()
+            .relative_to(import_off)
+            .load(&mut self.builder.cursor(), vmctx);
+        let rets = self.indirect_call_inst(sig_ref, func_addr, real_call_args);
+        self.builder.ins().jump(join_block, &[rets[0].into()]);
+
+        self.builder.switch_to_block(join_block);
+        self.builder.seal_block(join_block);
+        let mut out = CallRets::new();
+        out.push(self.builder.block_params(join_block)[0]);
+        out
     }
 
     /// Inline lowering of a FACT adapter's `exit-sync-call` intrinsic, the

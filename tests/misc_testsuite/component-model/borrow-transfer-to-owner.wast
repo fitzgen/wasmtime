@@ -165,3 +165,181 @@
 )
 
 (assert_return (invoke "run" (u32.const 42)) (u32.const 1001))
+
+;; An out-of-bounds handle fails the inline to-owner lend's bounds check, which
+;; routes it to the libcall rather than trapping inline, so the diagnostic is
+;; still the host's and is unchanged by inlining. This gets its own component
+;; because a trap locks an instance down and each of the instances above
+;; already spends its trap.
+(component
+  (component $A
+    (type $t' (resource (rep i32)))
+    (export $t "t" (type $t'))
+    (core func $ctor (canon resource.new $t))
+    (core module $m
+      (func (export "[method]t.get") (param i32) (result i32)
+        (local.get 0))
+    )
+    (core instance $i (instantiate $m))
+    (func (export "[constructor]t") (param "x" u32) (result (own $t))
+      (canon lift (core func $ctor)))
+    (func (export "[method]t.get") (param "self" (borrow $t)) (result u32)
+      (canon lift (core func $i "[method]t.get")))
+  )
+  (instance $a (instantiate $A))
+
+  (component $B
+    (import "a" (instance $i
+      (export "t" (type $t (sub resource)))
+      (export "[method]t.get" (func (param "self" (borrow $t)) (result u32)))
+    ))
+    (alias export $i "t" (type $t))
+    (alias export $i "[method]t.get" (func $get))
+    (core func $get' (canon lower (func $get)))
+    (core module $m
+      (import "" "get" (func $get (param i32) (result i32)))
+      (func (export "lend-unknown") (result i32)
+        (call $get (i32.const 1234)))
+    )
+    (core instance $i2 (instantiate $m
+      (with "" (instance (export "get" (func $get'))))))
+    (func (export "lend-unknown") (result u32)
+      (canon lift (core func $i2 "lend-unknown")))
+  )
+  (instance $b (instantiate $B (with "a" (instance $a))))
+  (export "lend-unknown" (func $b "lend-unknown"))
+)
+
+(assert_trap (invoke "lend-unknown") "unknown handle index 1234")
+
+;; A to-owner borrow lowered *after* something in the same signature forced
+;; the deferred thread. This is the regression test for the bug the inline
+;; lend's thread guard prevents: a lend recorded in `lazy_lenders` once the
+;; thread is no longer deferred would never be promoted into the real
+;; `CallContext`, so the handle could be dropped while still lent.
+;;
+;; The `own` parameter is transferred first, which goes through the host and
+;; forces the thread; the `borrow` after it must then take the slow path and
+;; be tracked as a real lend, which is undone on the way out. The final
+;; `resource.drop` of the lent handle only succeeds if it was.
+(component
+  (component $A
+    (type $t' (resource (rep i32)))
+    (export $t "t" (type $t'))
+
+    (core func $ctor (canon resource.new $t))
+    (core func $drop (canon resource.drop $t))
+
+    (core module $m
+      (import "" "drop" (func $drop (param i32)))
+      ;; `o` arrives as an owned handle in this instance's table and must be
+      ;; dropped; `b` arrives as a rep, since this instance owns the resource.
+      (func (export "take") (param $o i32) (param $b i32) (result i32)
+        (call $drop (local.get $o))
+        (local.get $b))
+    )
+    (core instance $i (instantiate $m
+      (with "" (instance (export "drop" (func $drop))))))
+
+    (func (export "[constructor]t") (param "x" u32) (result (own $t))
+      (canon lift (core func $ctor)))
+    (func (export "take") (param "o" (own $t)) (param "b" (borrow $t)) (result u32)
+      (canon lift (core func $i "take")))
+  )
+  (instance $a (instantiate $A))
+
+  (component $B
+    (import "a" (instance $i
+      (export "t" (type $t (sub resource)))
+      (export "[constructor]t" (func (param "x" u32) (result (own $t))))
+      (export "take" (func (param "o" (own $t)) (param "b" (borrow $t)) (result u32)))
+    ))
+    (alias export $i "t" (type $t))
+    (alias export $i "[constructor]t" (func $ctor))
+    (alias export $i "take" (func $take))
+
+    (core func $ctor' (canon lower (func $ctor)))
+    (core func $take' (canon lower (func $take)))
+    (core func $drop (canon resource.drop $t))
+
+    (core module $m
+      (import "" "ctor" (func $ctor (param i32) (result i32)))
+      (import "" "take" (func $take (param i32 i32) (result i32)))
+      (import "" "drop" (func $drop (param i32)))
+
+      (func (export "run") (result i32)
+        (local $given i32) (local $lent i32) (local $v i32)
+        (local.set $given (call $ctor (i32.const 1)))
+        (local.set $lent (call $ctor (i32.const 42)))
+        (local.set $v (call $take (local.get $given) (local.get $lent)))
+        ;; Only succeeds if the lend of `$lent` was undone on the way out.
+        (call $drop (local.get $lent))
+        (local.get $v))
+    )
+    (core instance $i2 (instantiate $m (with "" (instance
+      (export "ctor" (func $ctor'))
+      (export "take" (func $take'))
+      (export "drop" (func $drop))))))
+
+    (func (export "run") (result u32)
+      (canon lift (core func $i2 "run")))
+  )
+  (instance $b (instantiate $B (with "a" (instance $a))))
+  (export "lend-after-force" (func $b "run"))
+)
+
+(assert_return (invoke "lend-after-force") (u32.const 42))
+
+;; A handle of the wrong resource type fails the inline to-owner lend's type
+;; check, which routes it to the libcall so the host's diagnostic is unchanged
+;; by inlining. As above, this gets its own component because a trap locks an
+;; instance down.
+(component
+  (component $A
+    (type $t' (resource (rep i32)))
+    (type $u' (resource (rep i32)))
+    (export $t "t" (type $t'))
+    (export $u "u" (type $u'))
+    (core func $ctor-u (canon resource.new $u))
+    (core module $m
+      (func (export "get") (param i32) (result i32)
+        (local.get 0))
+    )
+    (core instance $i (instantiate $m))
+    (func (export "[constructor]u") (param "x" u32) (result (own $u))
+      (canon lift (core func $ctor-u)))
+    (func (export "get") (param "self" (borrow $t)) (result u32)
+      (canon lift (core func $i "get")))
+  )
+  (instance $a (instantiate $A))
+
+  (component $B
+    (import "a" (instance $i
+      (export "t" (type $t (sub resource)))
+      (export "u" (type $u (sub resource)))
+      (export "[constructor]u" (func (param "x" u32) (result (own $u))))
+      (export "get" (func (param "self" (borrow $t)) (result u32)))
+    ))
+    (alias export $i "[constructor]u" (func $ctor-u))
+    (alias export $i "get" (func $get))
+    (core func $ctor-u' (canon lower (func $ctor-u)))
+    (core func $get' (canon lower (func $get)))
+    (core module $m
+      (import "" "ctor-u" (func $ctor-u (param i32) (result i32)))
+      (import "" "get" (func $get (param i32) (result i32)))
+      ;; Lends a `u` handle where a `t` is expected.
+      (func (export "lend-wrong-type") (result i32)
+        (call $get (call $ctor-u (i32.const 7))))
+    )
+    (core instance $i2 (instantiate $m (with "" (instance
+      (export "ctor-u" (func $ctor-u'))
+      (export "get" (func $get'))))))
+    (func (export "lend-wrong-type") (result u32)
+      (canon lift (core func $i2 "lend-wrong-type")))
+  )
+  (instance $b (instantiate $B (with "a" (instance $a))))
+  (export "lend-wrong-type" (func $b "lend-wrong-type"))
+)
+
+(assert_trap (invoke "lend-wrong-type")
+  "handle index 1 used with the wrong type, expected guest-defined resource but found a different guest-defined resource")

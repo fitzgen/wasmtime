@@ -760,6 +760,23 @@ macro_rules! for_each_vm_type {
                 } = 9,
             }
 
+            /// One `HandleTable`'s slots, as compiled code sees them.
+            ///
+            /// The length lets a fused adapter's inline to-owner lend bounds check a
+            /// guest-supplied handle. Rewritten whenever the buffer grows, the way a
+            /// `VMTableDefinition` is after a `table.grow`.
+            #[cfg(feature = "component-model")]
+            #[derive(Debug, Copy, Clone)]
+            #[repr(C)]
+            #[snake_name = vm_handle_table]
+            pub struct VMHandleTable {
+                /// Pointer to the slots.
+                pub base: VmPtr<VMHandleTableSlot>,
+
+                /// The number of slots in `base`.
+                pub current_slots: usize,
+            }
+
             /// A deferred component-model thread.
             ///
             /// This is an on-stack record pushed by a fused sync-to-sync adapter's fast
