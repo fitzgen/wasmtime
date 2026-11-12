@@ -20,9 +20,9 @@
 
 use crate::component::dfg::{AdapterId, ComponentDfg, CoreDef};
 use crate::component::{
-    AdapterOptions as AdapterOptionsDfg, CanonicalAbiInfo, ComponentTypesBuilder, FlatType,
-    InterfaceType, RuntimeComponentInstanceIndex, StringEncoding, Transcode, TypeFuncIndex,
-    TypeResourceTableIndex, UnsafeIntrinsic,
+    AdapterOptions as AdapterOptionsDfg, CanonicalAbiInfo, ComponentTypesBuilder,
+    FactVersionedIntrinsic, FlatType, InterfaceType, RuntimeComponentInstanceIndex, StringEncoding,
+    Transcode, TypeFuncIndex, TypeResourceTableIndex, UnsafeIntrinsic,
 };
 use crate::fact::transcode::Transcoder;
 use crate::prelude::*;
@@ -100,6 +100,7 @@ pub struct Module<'a> {
 
     imported_enter_sync_call: Option<FuncIndex>,
     imported_exit_sync_call: Option<FuncIndex>,
+    imported_fact_versioned: HashMap<FactVersionedIntrinsic, FuncIndex>,
     imported_hostcall_fuel: Option<FuncIndex>,
 
     /// Whether any adapter uses the defined global holding the hostcall fuel
@@ -308,6 +309,7 @@ impl<'a> Module<'a> {
             imported_error_context_transfer: None,
             imported_enter_sync_call: None,
             imported_exit_sync_call: None,
+            imported_fact_versioned: HashMap::new(),
             imported_hostcall_fuel: None,
             hostcall_fuel_global: false,
             imported_unsafe_intrinsics: HashMap::new(),
@@ -757,6 +759,32 @@ impl<'a> Module<'a> {
         )
     }
 
+    /// Imports a guard or fast path of an intrinsic that FACT has split into
+    /// a guard, a fast path, and a slow path.
+    fn import_fact_versioned(&mut self, intrinsic: FactVersionedIntrinsic) -> FuncIndex {
+        let params = intrinsic
+            .params()
+            .iter()
+            .map(wasm_val_type)
+            .collect::<Vec<_>>();
+        let results = intrinsic
+            .results()
+            .iter()
+            .map(wasm_val_type)
+            .collect::<Vec<_>>();
+        self.import_simple_get_and_set(
+            "versioned",
+            &intrinsic.name(),
+            &params,
+            &results,
+            Import::FactVersioned(intrinsic),
+            |me| me.imported_fact_versioned.get(&intrinsic).copied(),
+            |me, idx| {
+                assert!(me.imported_fact_versioned.insert(intrinsic, idx).is_none());
+            },
+        )
+    }
+
     fn import_hostcall_fuel(&mut self) -> FuncIndex {
         self.import_simple(
             "runtime",
@@ -789,16 +817,16 @@ impl<'a> Module<'a> {
     }
 
     fn import_unsafe_intrinsic(&mut self, intrinsic: UnsafeIntrinsic, name: &str) -> FuncIndex {
-        let map = |ty: &WasmValType| match ty {
-            crate::WasmValType::I32 => ValType::I32,
-            crate::WasmValType::I64 => ValType::I64,
-            crate::WasmValType::F32 => ValType::F32,
-            crate::WasmValType::F64 => ValType::F64,
-            crate::WasmValType::V128 => ValType::V128,
-            crate::WasmValType::Ref(_) => unreachable!(),
-        };
-        let params = intrinsic.core_params().iter().map(map).collect::<Vec<_>>();
-        let results = intrinsic.core_results().iter().map(map).collect::<Vec<_>>();
+        let params = intrinsic
+            .core_params()
+            .iter()
+            .map(wasm_val_type)
+            .collect::<Vec<_>>();
+        let results = intrinsic
+            .core_results()
+            .iter()
+            .map(wasm_val_type)
+            .collect::<Vec<_>>();
 
         self.import_simple_get_and_set(
             "context",
@@ -932,6 +960,19 @@ impl<'a> Module<'a> {
     }
 }
 
+/// Converts the type of an intrinsic's parameter or result into its
+/// `wasm_encoder` equivalent.
+fn wasm_val_type(ty: &WasmValType) -> ValType {
+    match ty {
+        WasmValType::I32 => ValType::I32,
+        WasmValType::I64 => ValType::I64,
+        WasmValType::F32 => ValType::F32,
+        WasmValType::F64 => ValType::F64,
+        WasmValType::V128 => ValType::V128,
+        WasmValType::Ref(_) => unreachable!("intrinsics do not take or return references"),
+    }
+}
+
 /// Possible imports into an adapter module.
 #[derive(Clone)]
 pub enum Import {
@@ -997,6 +1038,9 @@ pub enum Import {
     /// An intrinsic used by FACT-generated modules to pop the task previously
     /// pushed by `EnterSyncCall`.
     ExitSyncCall,
+    /// A guard or fast path of an intrinsic that FACT has split into a guard,
+    /// a fast path, and a slow path.
+    FactVersioned(FactVersionedIntrinsic),
     /// An unsafe intrinsic, such as reading/writing `context.{get,set}` slots.
     UnsafeIntrinsic(UnsafeIntrinsic),
 }
@@ -1108,6 +1152,7 @@ struct Function {
 /// with a 5-byte leb to fill in later, but for now this felt easier to
 /// represent. A 5-byte leb may be more efficient at compile-time if necessary,
 /// however.
+#[derive(Clone)]
 enum Body {
     /// Raw wasm opcodes which aren't affected by imports.
     Raw(Vec<u8>),

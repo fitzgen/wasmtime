@@ -716,6 +716,16 @@ impl<'a, 'data> Translator<'a, 'data> {
                                     )
                                     .into()
                                 }
+                                Trampoline::FactVersioned(intrinsic) => {
+                                    let instance = intrinsic.resource_table().map(|ty| {
+                                        self.types.types()[ty].unwrap_concrete_instance()
+                                    });
+                                    FactInlineIntrinsic::from(FactComponentIntrinsic::Versioned {
+                                        intrinsic,
+                                        instance,
+                                    })
+                                    .into()
+                                }
                                 _ => continue,
                             },
 

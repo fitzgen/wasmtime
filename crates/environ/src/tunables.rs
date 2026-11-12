@@ -216,6 +216,27 @@ define_tunables! {
         /// Whether `metadata.code.branch_hint` sections are parsed and used to
         /// mark cold blocks during compilation.
         pub branch_hinting: bool,
+
+        /// Whether FACT splits the intrinsics that sync-to-sync adapters call
+        /// into a guard, a fast path, and a slow path, and does its own
+        /// branching between them, rather than emitting a plain call to each
+        /// intrinsic's out-of-line libcall.
+        ///
+        /// Only has an effect together with `concurrency_support`, and only
+        /// when compiling with Cranelift, which lowers the guards and fast
+        /// paths inline.
+        pub fact_versioning: bool,
+
+        /// With `fact_versioning`, whether FACT lays out each sync-to-sync
+        /// adapter so that its fast path never rejoins its slow path (tail
+        /// duplication), rather than emitting a local diamond for each
+        /// versioned intrinsic.
+        pub fact_tail_duplication: bool,
+
+        /// A debugging aid: with `fact_versioning`, lower every guard of a
+        /// versioned FACT intrinsic as "the fast path does not apply" so that
+        /// adapters always take their slow paths.
+        pub fact_versioning_always_bail: bool,
     }
 
     pub struct ConfigTunables {
@@ -307,6 +328,9 @@ impl Tunables {
             metadata_for_gc_heap_corruption: true,
             branch_hinting: false,
             debug_symbols: true,
+            fact_versioning: true,
+            fact_tail_duplication: true,
+            fact_versioning_always_bail: false,
         }
     }
 

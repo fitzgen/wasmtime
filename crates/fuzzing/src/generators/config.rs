@@ -337,6 +337,21 @@ impl Config {
                     Some(std::cmp::min(1000, size).to_string()),
                 ));
             }
+            for (name, value) in [
+                ("wasmtime_fact_versioning", self.wasmtime.fact_versioning),
+                (
+                    "wasmtime_fact_versioning_always_bail",
+                    self.wasmtime.fact_versioning_always_bail,
+                ),
+                (
+                    "wasmtime_fact_tail_duplication",
+                    self.wasmtime.fact_tail_duplication,
+                ),
+            ] {
+                cfg.codegen
+                    .cranelift
+                    .push((name.to_string(), Some(value.to_string())));
+            }
 
             // Enabling the verifier will at-least-double compilation time, which
             // with a 20-30x slowdown in fuzzing can cause issues related to
@@ -542,6 +557,12 @@ pub struct WasmtimeConfig {
     inlining: Option<Inlining>,
     inlining_small_callee_size: Option<u32>,
     inlining_sum_size_threshold: Option<u32>,
+    /// Whether fused adapters take inline fast paths when they apply, and if
+    /// so, whether they always bail to their slow paths and whether their
+    /// layout duplicates code so that fast paths never rejoin slow paths.
+    fact_versioning: bool,
+    fact_versioning_always_bail: bool,
+    fact_tail_duplication: bool,
     use_precompiled_cwasm: bool,
     async_stack_zeroing: bool,
     /// Configuration for the instance allocation strategy to use.

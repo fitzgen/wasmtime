@@ -93,9 +93,10 @@
 ;;     sig2 = (i64 vmctx, i64, i32, i32) tail
 ;;     sig3 = (i64 vmctx, i64, i32) -> i32 tail
 ;;     sig4 = (i64 vmctx, i64) -> i32 tail
+;;     sig5 = (i64 vmctx, i64) -> i32 tail
 ;;     fn0 = colocated u2:0 sig0
 ;;     fn1 = colocated u0:0 sig3
-;;     fn2 = colocated u2147483648:17 sig4
+;;     fn2 = colocated u2147483648:17 sig5
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64):
@@ -106,7 +107,7 @@
 ;;
 ;;                                 block6:
 ;; @0123                               v3 = load.i64 notrap aligned readonly can_move region2 v0+72
-;;                                     v9 = load.i64 notrap aligned readonly can_move region3 v3+232
+;;                                     v9 = load.i64 notrap aligned readonly can_move region3 v3+296
 ;;                                     v10 = load.i32 notrap aligned region4 v9
 ;;                                     trapz v10, user26
 ;;                                     jump block9
@@ -141,15 +142,15 @@
 ;;                                     jump block11
 ;;
 ;;                                 block11:
-;;                                     jump block12
-;;
-;;                                 block12:
-;;                                     store.i64 notrap aligned region5 v16, v15+136
-;;                                     store.i32 notrap aligned region9 v17, v15+128
-;;                                     store.i32 notrap aligned region11 v19, v15+132
 ;;                                     jump block14
 ;;
 ;;                                 block14:
+;;                                     store.i64 notrap aligned region5 v16, v15+136
+;;                                     store.i32 notrap aligned region9 v17, v15+128
+;;                                     store.i32 notrap aligned region11 v19, v15+132
+;;                                     jump block12
+;;
+;;                                 block12:
 ;;                                     jump block7
 ;;
 ;;                                 block7:
@@ -166,6 +167,6 @@
 ;;
 ;;                                 block1:
 ;; @0120                               v2 = iconst.i32 1234
-;;                                     v38 = iadd.i32 v25, v2  ; v2 = 1234
-;; @0125                               return v38
+;;                                     v46 = iadd.i32 v25, v2  ; v2 = 1234
+;; @0125                               return v46
 ;; }

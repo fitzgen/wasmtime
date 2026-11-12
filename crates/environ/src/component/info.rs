@@ -1147,6 +1147,16 @@ pub enum Trampoline {
     /// pushed by `EnterSyncCall`.
     ExitSyncCall,
 
+    /// A guard or fast-path piece of an intrinsic that a FACT adapter has split
+    /// into a guard, a fast path, and a slow path.
+    ///
+    /// These only ever appear in adapters compiled with
+    /// `Tunables::fact_versioning`, where Cranelift lowers them inline. Their
+    /// out-of-line versions exist only as a fallback, so every guard is
+    /// compiled as "the fast path does not apply" and every fast path as a
+    /// call to its slow path's libcall.
+    FactVersioned(FactVersionedIntrinsic),
+
     /// Intrinsic used to implement the `thread.index` component model builtin.
     ThreadIndex {
         /// The specific component instance which is calling the intrinsic.
@@ -1211,6 +1221,136 @@ pub enum Trampoline {
         /// The specific component instance which is calling the intrinsic.
         instance: RuntimeComponentInstanceIndex,
     },
+}
+
+/// The guards and fast paths of the intrinsics that FACT adapters split into
+/// a guard, a fast path, and a slow path.
+///
+/// Each guard returns an `i32` that is non-zero when the fast path applies, and
+/// may assume that every earlier guard of the same intrinsic returned non-zero.
+/// A fast path may assume that every guard of its intrinsic returned non-zero.
+/// The slow paths are the pre-existing `ExitSyncCall` and
+/// `ResourceTransferBorrowToOwner` trampolines.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum FactVersionedIntrinsic {
+    /// Guard of both `exit-sync-call` and `resource.transfer-borrow-to-owner`:
+    /// whether the deferred thread pushed by this adapter's `enter-sync-call`
+    /// is still the store's current thread, meaning that nothing has forced it
+    /// into a real thread.
+    DeferredThreadIsCurrent,
+    /// Fast path of `exit-sync-call`: pop the deferred thread, discard its lazy
+    /// lends, and restore the caller's context slots.
+    ExitSyncCallFast,
+
+    /// Guard of `resource.transfer-borrow-to-owner`: whether the store's lazy
+    /// lenders have room for another entry.
+    TransferBorrowToOwnerHasRoom,
+    /// Guard of `resource.transfer-borrow-to-owner`, taking the handle: whether
+    /// the handle is in bounds of `ty`'s handle table.
+    TransferBorrowToOwnerInBounds {
+        /// The resource table the borrow is being transferred out of.
+        ty: TypeResourceTableIndex,
+    },
+    /// Guard of `resource.transfer-borrow-to-owner`, taking the handle: whether
+    /// the handle's slot holds an owned or borrowed resource.
+    TransferBorrowToOwnerIsResource {
+        /// The resource table the borrow is being transferred out of.
+        ty: TypeResourceTableIndex,
+    },
+    /// Guard of `resource.transfer-borrow-to-owner`, taking the handle: whether
+    /// the handle's resource has type `ty`.
+    TransferBorrowToOwnerHasType {
+        /// The resource table the borrow is being transferred out of.
+        ty: TypeResourceTableIndex,
+    },
+    /// Fast path of `resource.transfer-borrow-to-owner`, taking the handle:
+    /// record a lazy lend of the handle and return its resource's `rep`.
+    TransferBorrowToOwnerFast {
+        /// The resource table the borrow is being transferred out of.
+        ty: TypeResourceTableIndex,
+    },
+}
+
+impl FactVersionedIntrinsic {
+    /// The name of this intrinsic, used both for its import into an adapter
+    /// module and for its trampoline's symbol.
+    pub fn name(&self) -> String {
+        use FactVersionedIntrinsic::*;
+        match self {
+            DeferredThreadIsCurrent => format!("deferred-thread-is-current"),
+            ExitSyncCallFast => format!("exit-sync-call-fast"),
+            TransferBorrowToOwnerHasRoom => format!("transfer-borrow-to-owner-has-room"),
+            TransferBorrowToOwnerInBounds { ty } => {
+                format!("transfer-borrow-to-owner-in-bounds{}", ty.as_u32())
+            }
+            TransferBorrowToOwnerIsResource { ty } => {
+                format!("transfer-borrow-to-owner-is-resource{}", ty.as_u32())
+            }
+            TransferBorrowToOwnerHasType { ty } => {
+                format!("transfer-borrow-to-owner-has-type{}", ty.as_u32())
+            }
+            TransferBorrowToOwnerFast { ty } => {
+                format!("transfer-borrow-to-owner-fast{}", ty.as_u32())
+            }
+        }
+    }
+
+    /// Whether this intrinsic is a guard, as opposed to a fast path.
+    pub fn is_guard(&self) -> bool {
+        use FactVersionedIntrinsic::*;
+        match self {
+            DeferredThreadIsCurrent
+            | TransferBorrowToOwnerHasRoom
+            | TransferBorrowToOwnerInBounds { .. }
+            | TransferBorrowToOwnerIsResource { .. }
+            | TransferBorrowToOwnerHasType { .. } => true,
+            ExitSyncCallFast | TransferBorrowToOwnerFast { .. } => false,
+        }
+    }
+
+    /// This intrinsic's parameters, as core Wasm value types.
+    ///
+    /// The transfer's guards that inspect the handle, and its fast path, take
+    /// the borrowed handle. The rest take nothing.
+    pub const fn params(&self) -> &'static [WasmValType] {
+        use FactVersionedIntrinsic::*;
+        match self {
+            DeferredThreadIsCurrent | ExitSyncCallFast | TransferBorrowToOwnerHasRoom => &[],
+            TransferBorrowToOwnerInBounds { .. }
+            | TransferBorrowToOwnerIsResource { .. }
+            | TransferBorrowToOwnerHasType { .. }
+            | TransferBorrowToOwnerFast { .. } => &[WasmValType::I32],
+        }
+    }
+
+    /// This intrinsic's results, as core Wasm value types.
+    ///
+    /// Every guard returns its condition, and the transfer's fast path returns
+    /// the resource's `rep`.
+    pub const fn results(&self) -> &'static [WasmValType] {
+        use FactVersionedIntrinsic::*;
+        match self {
+            ExitSyncCallFast => &[],
+            DeferredThreadIsCurrent
+            | TransferBorrowToOwnerHasRoom
+            | TransferBorrowToOwnerInBounds { .. }
+            | TransferBorrowToOwnerIsResource { .. }
+            | TransferBorrowToOwnerHasType { .. }
+            | TransferBorrowToOwnerFast { .. } => &[WasmValType::I32],
+        }
+    }
+
+    /// The resource table this intrinsic transfers a borrow out of, if any.
+    pub fn resource_table(&self) -> Option<TypeResourceTableIndex> {
+        use FactVersionedIntrinsic::*;
+        match self {
+            DeferredThreadIsCurrent | ExitSyncCallFast | TransferBorrowToOwnerHasRoom => None,
+            TransferBorrowToOwnerInBounds { ty }
+            | TransferBorrowToOwnerIsResource { ty }
+            | TransferBorrowToOwnerHasType { ty }
+            | TransferBorrowToOwnerFast { ty } => Some(*ty),
+        }
+    }
 }
 
 impl Trampoline {
@@ -1278,6 +1418,7 @@ impl Trampoline {
             HostcallFuel => format!("hostcall-fuel"),
             EnterSyncCall => format!("enter-sync-call"),
             ExitSyncCall => format!("exit-sync-call"),
+            FactVersioned(intrinsic) => intrinsic.name(),
             ThreadIndex { .. } => format!("thread-index"),
             ThreadNewIndirect { .. } => format!("thread-new-indirect"),
             ThreadResumeLater { .. } => format!("thread-resume-later"),

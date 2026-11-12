@@ -1,6 +1,6 @@
 use crate::component::{
-    ComponentTranslation, ComponentTypesBuilder, RuntimeComponentInstanceIndex,
-    TypeResourceTableIndex, UnsafeIntrinsic,
+    ComponentTranslation, ComponentTypesBuilder, FactVersionedIntrinsic,
+    RuntimeComponentInstanceIndex, TypeResourceTableIndex, UnsafeIntrinsic,
 };
 use crate::error::Result;
 use crate::{Abi, CompiledFunctionBody, FactInlineIntrinsic, FuncKey, Tunables};
@@ -15,6 +15,16 @@ pub enum FactComponentIntrinsic {
         ty: TypeResourceTableIndex,
         /// The component instance owning `ty`'s handle table.
         instance: RuntimeComponentInstanceIndex,
+    },
+
+    /// A guard or fast path of an intrinsic that FACT has split into a guard,
+    /// a fast path, and a slow path.
+    Versioned {
+        /// Which guard or fast path this is.
+        intrinsic: FactVersionedIntrinsic,
+        /// The component instance owning the handle table of
+        /// `intrinsic.resource_table()`, if it has one.
+        instance: Option<RuntimeComponentInstanceIndex>,
     },
 }
 

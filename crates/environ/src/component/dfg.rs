@@ -487,6 +487,7 @@ pub enum Trampoline {
     HostcallFuel,
     EnterSyncCall,
     ExitSyncCall,
+    FactVersioned(FactVersionedIntrinsic),
     ThreadIndex {
         instance: RuntimeComponentInstanceIndex,
     },
@@ -1210,6 +1211,7 @@ impl LinearizeDfg<'_> {
             Trampoline::HostcallFuel => info::Trampoline::HostcallFuel,
             Trampoline::EnterSyncCall => info::Trampoline::EnterSyncCall,
             Trampoline::ExitSyncCall => info::Trampoline::ExitSyncCall,
+            Trampoline::FactVersioned(intrinsic) => info::Trampoline::FactVersioned(*intrinsic),
             Trampoline::ThreadIndex { instance } => info::Trampoline::ThreadIndex {
                 instance: *instance,
             },

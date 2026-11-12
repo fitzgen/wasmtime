@@ -351,6 +351,14 @@ impl Metadata<'_> {
             // Only affects cold-block layout; a compiled artifact loads into an
             // engine configured either way.
             branch_hinting: _,
+
+            // These only change the code that FACT emits for adapters, and
+            // every compiled adapter is self-contained: an artifact compiled
+            // with any combination of these runs in an engine configured with
+            // any other.
+            fact_versioning: _,
+            fact_tail_duplication: _,
+            fact_versioning_always_bail: _,
         } = self.tunables;
 
         Self::check_collector(collector, other.collector)?;

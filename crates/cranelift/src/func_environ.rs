@@ -201,8 +201,9 @@ pub struct FuncEnvironment<'module_environment> {
 
     /// When translating a fused sync-to-sync adapter, the explicit stack slot
     /// holding the `VMDeferredThread` pushed by the inline `enter-sync-call`
-    /// lowering, shared with the matching inline `exit-sync-call`. `None`
-    /// outside that window.
+    /// lowering, which the inline guards and fast paths of the intrinsics that
+    /// the adapter calls after it all use. `None` before that `enter-sync-call`,
+    /// of which each adapter has at most one.
     fact_sync_call_slot: Option<ir::StackSlot>,
 
     /// Caches of signatures for builtin functions.
@@ -2393,42 +2394,57 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
                         return Ok(Reachability::Unreachable);
                     }
 
-                    // The guest-to-guest sync fast path: these adapter
-                    // intrinsics are lowered inline rather than called, but
-                    // only when concurrency support is enabled (the deferred
-                    // thread state only exists then) and this isn't a tail call
-                    // (the deferred frame must outlive the call). Otherwise
-                    // fall back to the indirect call, which is also the
-                    // out-of-line slow path the inline `exit` branches to.
+                    // The guest-to-guest sync fast path: `enter-sync-call` is
+                    // lowered inline rather than called, but only when
+                    // concurrency support is enabled (the deferred thread state
+                    // only exists then) and this isn't a tail call (the
+                    // deferred frame must outlive the call). Otherwise fall
+                    // back to the indirect call.
+                    //
+                    // `exit-sync-call` is always called out-of-line: when the
+                    // adapter can take a fast path instead, FACT branches to it
+                    // itself (see `FactComponentIntrinsic::Versioned`).
                     FactInlineIntrinsic::EnterSyncCall if self.env.tunables.concurrency_support => {
                         debug_assert!(!self.tail);
                         return Ok(Reachability::Reachable(
                             self.lower_fact_enter_sync_call(&real_call_args),
                         ));
                     }
-                    FactInlineIntrinsic::ExitSyncCall if self.env.tunables.concurrency_support => {
-                        debug_assert!(!self.tail);
-                        return Ok(Reachability::Reachable(self.lower_fact_exit_sync_call(
-                            callee_index,
-                            sig_ref,
-                            &real_call_args,
-                        )));
-                    }
 
                     #[cfg(feature = "component-model")]
                     FactInlineIntrinsic::Component(intrinsic) => {
-                        if let Some(rets) = self.lower_fact_component_intrinsic(
-                            *intrinsic,
-                            callee_index,
-                            sig_ref,
-                            &real_call_args,
-                        ) {
+                        if let Some(rets) =
+                            self.lower_fact_component_intrinsic(*intrinsic, &real_call_args)
+                        {
                             return Ok(Reachability::Reachable(rets));
                         }
                     }
 
                     FactInlineIntrinsic::EnterSyncCall | FactInlineIntrinsic::ExitSyncCall => {}
                 }
+
+                // With versioning, FACT only calls the out-of-line slow paths
+                // of `exit-sync-call` and `resource.transfer-borrow-to-owner`
+                // after one of their guards fails, at the start of a block that
+                // only that failure branches to.
+                let is_slow_path = match intrinsic {
+                    FactInlineIntrinsic::ExitSyncCall => true,
+                    #[cfg(feature = "component-model")]
+                    FactInlineIntrinsic::Component(
+                        wasmtime_environ::component::FactComponentIntrinsic::ResourceTransferBorrowToOwner {
+                            ..
+                        },
+                    ) => true,
+                    _ => false,
+                };
+                if is_slow_path
+                    && self.env.tunables.fact_versioning
+                    && self.env.fact_sync_call_slot.is_some()
+                {
+                    let block = self.builder.current_block().unwrap();
+                    self.builder.set_cold_block(block);
+                }
+
                 Ok(Reachability::Reachable(self.imported_call_inst(
                     callee_index,
                     sig_ref,
@@ -2494,55 +2510,112 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
     fn lower_fact_component_intrinsic(
         &mut self,
         intrinsic: wasmtime_environ::component::FactComponentIntrinsic,
-        callee_index: FuncIndex,
-        sig_ref: ir::SigRef,
         real_call_args: &[ir::Value],
     ) -> Option<CallRets> {
-        use wasmtime_environ::component::FactComponentIntrinsic;
-        match intrinsic {
-            FactComponentIntrinsic::ResourceTransferBorrowToOwner { ty, instance } => {
-                // Needs an enclosing deferred frame to record into.
-                if !self.env.tunables.concurrency_support || self.env.fact_sync_call_slot.is_none()
-                {
-                    return None;
-                }
-                debug_assert!(!self.tail);
-                let rep = component_sync_call::transfer_borrow_to_owner(
-                    self,
-                    ty,
-                    instance,
-                    callee_index,
-                    sig_ref,
-                    real_call_args,
-                );
-                let mut out = CallRets::new();
-                out.push(rep);
-                Some(out)
-            }
+        use wasmtime_environ::component::{FactComponentIntrinsic, FactVersionedIntrinsic};
+        let (intrinsic, instance) = match intrinsic {
+            // The out-of-line slow path of a transfer: when the adapter can
+            // take a fast path instead, FACT branches to it itself.
+            FactComponentIntrinsic::ResourceTransferBorrowToOwner { .. } => return None,
+            FactComponentIntrinsic::Versioned {
+                intrinsic,
+                instance,
+            } => (intrinsic, instance),
+        };
+
+        // FACT only calls these after an `enter-sync-call`, which is lowered
+        // inline exactly when concurrency support is enabled. The out-of-line
+        // versions are correct, if slow, so use them in any other case.
+        let slot = self.env.fact_sync_call_slot?;
+        debug_assert!(self.env.tunables.concurrency_support);
+        debug_assert!(!self.tail);
+
+        let mut out = CallRets::new();
+        if self.env.tunables.fact_versioning_always_bail && intrinsic.is_guard() {
+            out.push(self.builder.ins().iconst(ir::types::I32, 0));
+            return Some(out);
         }
-    }
 
-    /// Inline lowering of a FACT adapter's `exit-sync-call` intrinsic, the
-    /// counterpart to `lower_fact_enter_sync_call`.
-    fn lower_fact_exit_sync_call(
-        &mut self,
-        callee_index: FuncIndex,
-        sig_ref: ir::SigRef,
-        real_call_args: &[ir::Value],
-    ) -> CallRets {
-        let slot = self
-            .env
-            .fact_sync_call_slot
-            .take()
-            .expect("inline exit-sync-call without a matching enter-sync-call");
         let vmctx = self.env.vmctx_val(&mut self.builder.cursor());
-        let slow =
-            component_sync_call::exit(self.builder, &mut self.env.alias_regions, vmctx, slot);
+        let builder = &mut *self.builder;
+        let regions = self
+            .env
+            .component_regions
+            .as_mut()
+            .expect("an adapter's intrinsics require the component's offsets");
 
-        self.imported_call_inst(callee_index, sig_ref, real_call_args);
+        // The handle table and handle of a transfer. `real_call_args` is
+        // `[callee_vmctx, caller_vmctx, handle]`, where the callee's vmctx is
+        // the `VMComponentContext` that owns the handle table.
+        let transfer = intrinsic.resource_table().map(|ty| {
+            let transfer = component_sync_call::TransferBorrow {
+                vmcomponent: real_call_args[0],
+                table_offset: regions
+                    .offsets()
+                    .handle_tables()
+                    .at(instance.expect("a transfer's table has an owning instance")),
+                index: real_call_args[2],
+            };
+            (ty, transfer)
+        });
+        let transfer = || transfer.as_ref().unwrap();
 
-        slow.finish(self.builder);
-        CallRets::new()
+        let result = match intrinsic {
+            FactVersionedIntrinsic::DeferredThreadIsCurrent => {
+                Some(component_sync_call::deferred_thread_is_current(
+                    builder,
+                    &mut self.env.alias_regions,
+                    vmctx,
+                    slot,
+                ))
+            }
+            FactVersionedIntrinsic::ExitSyncCallFast => {
+                component_sync_call::exit_fast(builder, &mut self.env.alias_regions, vmctx, slot);
+                None
+            }
+            FactVersionedIntrinsic::TransferBorrowToOwnerHasRoom => Some(
+                component_sync_call::transfer_borrow_to_owner_has_room(builder, regions, vmctx),
+            ),
+            FactVersionedIntrinsic::TransferBorrowToOwnerInBounds { .. } => {
+                Some(component_sync_call::transfer_borrow_to_owner_in_bounds(
+                    builder,
+                    regions,
+                    &transfer().1,
+                ))
+            }
+            FactVersionedIntrinsic::TransferBorrowToOwnerIsResource { .. } => {
+                Some(component_sync_call::transfer_borrow_to_owner_is_resource(
+                    builder,
+                    regions,
+                    &transfer().1,
+                ))
+            }
+            FactVersionedIntrinsic::TransferBorrowToOwnerHasType { .. } => {
+                let (ty, transfer) = transfer();
+                Some(component_sync_call::transfer_borrow_to_owner_has_type(
+                    builder, regions, transfer, *ty,
+                ))
+            }
+            FactVersionedIntrinsic::TransferBorrowToOwnerFast { .. } => {
+                let (ty, transfer) = transfer();
+                Some(component_sync_call::transfer_borrow_to_owner_fast(
+                    builder, regions, vmctx, transfer, *ty,
+                ))
+            }
+        };
+        if let Some(result) = result {
+            // Guards produce `icmp` results, which are `i8`s in CLIF but `i32`s
+            // in Wasm.
+            let result = match builder.func.dfg.value_type(result) {
+                ir::types::I8 => builder.ins().uextend(ir::types::I32, result),
+                ty => {
+                    debug_assert_eq!(ty, ir::types::I32);
+                    result
+                }
+            };
+            out.push(result);
+        }
+        Some(out)
     }
 
     /// Do a Wasm-level indirect call through the given funcref table.

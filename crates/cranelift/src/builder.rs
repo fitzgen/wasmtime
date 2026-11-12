@@ -93,6 +93,15 @@ impl CompilerBuilder for Builder {
             "wasmtime_inlining_sum_size_threshold" => {
                 self.tunables.as_mut().unwrap().inlining_sum_size_threshold = value.parse()?;
             }
+            "wasmtime_fact_versioning" => {
+                self.tunables.as_mut().unwrap().fact_versioning = value.parse()?;
+            }
+            "wasmtime_fact_tail_duplication" => {
+                self.tunables.as_mut().unwrap().fact_tail_duplication = value.parse()?;
+            }
+            "wasmtime_fact_versioning_always_bail" => {
+                self.tunables.as_mut().unwrap().fact_versioning_always_bail = value.parse()?;
+            }
             "wasmtime_debug_checks" => {
                 self.emit_debug_checks = true;
             }

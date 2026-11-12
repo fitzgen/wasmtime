@@ -718,6 +718,42 @@ impl<'a> TrampolineCompiler<'a> {
                     |_, _| {},
                 );
             }
+            Trampoline::FactVersioned(intrinsic) => {
+                // These are normally lowered inline into the adapter, so these
+                // out-of-line versions are only a fallback.
+                use wasmtime_environ::component::FactVersionedIntrinsic;
+                match intrinsic {
+                    // A guard that says "the fast path does not apply" is
+                    // always conservatively correct.
+                    _ if intrinsic.is_guard() => {
+                        let zero = self.builder.ins().iconst(ir::types::I32, 0);
+                        self.abi_store_results(&[zero]);
+                    }
+
+                    // And a "fast path" that is identical to the slow path is
+                    // also always correct.
+                    FactVersionedIntrinsic::ExitSyncCallFast => {
+                        self.translate_libcall(
+                            host::exit_sync_call,
+                            TrapSentinel::Falsy,
+                            WasmArgs::InRegisters,
+                            |_, _| {},
+                        );
+                    }
+                    FactVersionedIntrinsic::TransferBorrowToOwnerFast { ty } => {
+                        self.translate_libcall(
+                            host::resource_transfer_borrow_to_owner,
+                            TrapSentinel::NegativeOne,
+                            WasmArgs::InRegisters,
+                            |me, params| {
+                                params.push(me.index_value(*ty));
+                            },
+                        );
+                    }
+
+                    _ => unreachable!(),
+                }
+            }
             Trampoline::ThreadIndex { .. } => {
                 self.translate_libcall(
                     host::thread_index,
@@ -1448,6 +1484,7 @@ impl<'a> TrampolineCompiler<'a> {
             | Trampoline::HostcallFuel
             | Trampoline::EnterSyncCall
             | Trampoline::ExitSyncCall
+            | Trampoline::FactVersioned(_)
             | Trampoline::Transcoder { .. } => return,
 
             Trampoline::LowerImport { options, .. } => self.component.options[*options].instance,

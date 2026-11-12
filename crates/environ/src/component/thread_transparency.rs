@@ -313,7 +313,8 @@ fn trampoline_callable(
         | Trap(_)
         | HostcallFuel
         | EnterSyncCall
-        | ExitSyncCall => {
+        | ExitSyncCall
+        | FactVersioned(_) => {
             unreachable!("these trampolines do not exist yet")
         }
     }

@@ -3313,6 +3313,14 @@ impl Config {
         }
         *tunables = compiler.tunables().cloned().unwrap();
 
+        // Winch calls every FACT intrinsic out-of-line, so it would gain nothing
+        // from FACT's inline guards and fast paths except the cost of calling
+        // them. This is applied after the compiler's settings, which may
+        // otherwise turn it back on.
+        if tunables.winch_callable {
+            tunables.fact_versioning = false;
+        }
+
         #[cfg(all(feature = "incremental-cache", feature = "cranelift"))]
         if let Some(cache_store) = &self.compiler_config_mut().cache_store {
             compiler.enable_incremental_compilation(cache_store.clone())?;

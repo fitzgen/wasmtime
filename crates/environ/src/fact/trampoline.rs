@@ -16,10 +16,10 @@
 //! can be somewhat arbitrary, an intentional decision.
 
 use crate::component::{
-    CanonicalAbiInfo, ComponentTypesBuilder, FixedEncoding as FE, FlatType, InterfaceType,
-    MAX_FLAT_ASYNC_PARAMS, MAX_FLAT_PARAMS, PREPARE_ASYNC_NO_RESULT, PREPARE_ASYNC_WITH_RESULT,
-    START_FLAG_ASYNC_CALLEE, START_FLAG_ASYNC_CALLER, StringEncoding, Transcode,
-    TypeComponentLocalErrorContextTableIndex, TypeEnumIndex, TypeFixedLengthListIndex,
+    CanonicalAbiInfo, ComponentTypesBuilder, FactVersionedIntrinsic, FixedEncoding as FE, FlatType,
+    InterfaceType, MAX_FLAT_ASYNC_PARAMS, MAX_FLAT_PARAMS, PREPARE_ASYNC_NO_RESULT,
+    PREPARE_ASYNC_WITH_RESULT, START_FLAG_ASYNC_CALLEE, START_FLAG_ASYNC_CALLER, StringEncoding,
+    Transcode, TypeComponentLocalErrorContextTableIndex, TypeEnumIndex, TypeFixedLengthListIndex,
     TypeFlagsIndex, TypeFutureTableIndex, TypeListIndex, TypeMapIndex, TypeOptionIndex,
     TypeRecordIndex, TypeResourceTableIndex, TypeResultIndex, TypeStreamTableIndex, TypeTupleIndex,
     TypeVariantIndex, VariantInfo,
@@ -78,6 +78,102 @@ struct Compiler<'a, 'b> {
     /// end of the function for tracking of information related to borrowed
     /// resources.
     emit_resource_call: bool,
+
+    /// The current structured control flow depth: the number of `block`,
+    /// `loop`, `if`, and `try_table` instructions emitted so far whose `end`
+    /// has not yet been emitted. Excludes the function body itself.
+    depth: u32,
+
+    /// Whether versioned calls emit their guards and fast paths, or only
+    /// their slow paths. See `Compiler::versioned_call`.
+    versioning: bool,
+
+    /// Whether the operand stack is known to hold nothing that was pushed
+    /// since the active region began. A versioned point only joins the
+    /// region's trace when this holds, since the region's layout branches out
+    /// of `block`s whose type is empty.
+    operand_stack_empty: bool,
+
+    /// The region being recorded, if any. See `Compiler::begin_region`.
+    region: Option<Region>,
+}
+
+/// A structured, single-entry, single-exit stretch of an adapter body whose
+/// versioned points are laid out by `Compiler::end_region` such that the fast
+/// path never rejoins the slow path.
+struct Region {
+    /// The structured control flow depth at which the region began. Versioned
+    /// points made at any other depth are emitted as local diamonds instead.
+    depth: u32,
+    /// The type of the operand stack at the end of the region: empty, or the
+    /// adapter's results.
+    results: BlockType,
+    /// The index into the function's `body` where the current shared segment
+    /// starts.
+    body_start: usize,
+    /// The trace from the region's first versioned point onwards. Code before
+    /// that point is never removed from the function's `body`, and so is
+    /// emitted exactly once, in place, by every layout.
+    segments: Vec<Segment>,
+}
+
+/// A piece of a region's trace.
+enum Segment {
+    /// Code that is identical on the fast and slow paths. It may contain its
+    /// own balanced control flow, but no region-level versioned points.
+    Shared(Vec<Body>),
+    /// A versioned point.
+    Versioned(Versioned),
+}
+
+/// A point at which an adapter has a fast version and a slow version of some
+/// work, along with the guards that decide whether the fast version applies.
+struct Versioned {
+    /// Evaluated in order, each leaves an `i32` on the operand stack that is
+    /// non-zero when the fast version applies, and may assume that all earlier
+    /// guards passed.
+    guards: Vec<Vec<Body>>,
+    /// The fast version, which may assume that all guards passed.
+    fast: Vec<Body>,
+    /// The slow version, which must be correct regardless of the guards.
+    slow: Vec<Body>,
+}
+
+impl Versioned {
+    /// Emits this point on its own, as a diamond that rejoins after the fast or
+    /// slow version:
+    ///
+    /// ```wasm
+    /// block
+    ///   block
+    ///     guard_0 i32.eqz br_if 0
+    ///     ...
+    ///     fast
+    ///     br 1
+    ///   end
+    ///   slow
+    /// end
+    /// ```
+    fn diamond(self, body: &mut Vec<Body>) {
+        body.push(raw(&[Block(BlockType::Empty), Block(BlockType::Empty)]));
+        for guard in self.guards {
+            body.extend(guard);
+            body.push(raw(&[I32Eqz, BrIf(0)]));
+        }
+        body.extend(self.fast);
+        body.push(raw(&[Br(1), End]));
+        body.extend(self.slow);
+        body.push(raw(&[End]));
+    }
+}
+
+/// Encodes `instrs` into a single `Body::Raw`.
+fn raw(instrs: &[Instruction<'_>]) -> Body {
+    let mut code = Vec::new();
+    for instr in instrs {
+        instr.encode(&mut code);
+    }
+    Body::Raw(code)
 }
 
 pub(super) fn compile(module: &mut Module<'_>, adapter: &AdapterData) {
@@ -291,6 +387,10 @@ pub(super) fn compile_helper(module: &mut Module<'_>, result: FunctionId, helper
         // This is a helper function and only the top-level function is
         // responsible for emitting these intrinsic calls.
         emit_resource_call: false,
+        depth: 0,
+        versioning: false,
+        operand_stack_empty: true,
+        region: None,
     };
     compiler.translate(&helper.src.ty, &src, &helper.dst.ty, &dst);
     compiler.finish();
@@ -401,6 +501,10 @@ impl<'a, 'b> Compiler<'a, 'b> {
             free_locals: HashMap::new(),
             fuel: INITIAL_FUEL,
             emit_resource_call,
+            depth: 0,
+            versioning: false,
+            operand_stack_empty: true,
+            region: None,
         }
     }
 
@@ -691,6 +795,22 @@ impl<'a, 'b> Compiler<'a, 'b> {
             self.instruction(Call(enter_sync_call.as_u32()));
         }
 
+        // Once `enter-sync-call` has pushed a deferred thread, the intrinsics
+        // that this adapter calls until the matching `exit-sync-call` each
+        // have an inline fast path that applies only as long as nothing has
+        // forced that thread. With versioning, FACT emits those fast paths and
+        // their guards itself, and lays the rest of the adapter out so that
+        // its fast path never rejoins its slow path. See
+        // `Compiler::versioned_call` and `Compiler::end_region`.
+        let enters_sync_call = needs_thread_state || self.emit_resource_call;
+        self.versioning = enters_sync_call
+            && self.module.tunables.fact_versioning
+            && self.module.tunables.concurrency_support;
+        if self.versioning && self.module.tunables.fact_tail_duplication {
+            let results = self.block_type(&lower_sig.results);
+            self.begin_region(results);
+        }
+
         // Perform the translation of arguments. Note that the `may_leave` flag
         // is cleared around this invocation for the callee as per the
         // `canon_lift` definition in the spec. Additionally note that the
@@ -760,6 +880,10 @@ impl<'a, 'b> Compiler<'a, 'b> {
         }
         result_locals.reverse();
 
+        // The call consumed all the arguments, and its results are now in
+        // locals.
+        self.operand_stack_empty = true;
+
         // The `exit-sync-call` intrinsic below will clobber this task's context
         // slots, but if we've got a post-return we'll want to restore them
         // temporarily for that. Save them if it's necessary.
@@ -782,12 +906,18 @@ impl<'a, 'b> Compiler<'a, 'b> {
         // lowering below may call realloc which is in the context of the
         // caller's task, not the callee.
         //
-        // Note that for sync-to-sync calls, we will emit inline code during
-        // translation to CLIF to avoid actually calling out to a libcall when
-        // the deferred task's allocation was never forced.
-        if self.emit_resource_call || needs_thread_state {
+        // With versioning, this takes an inline fast path that avoids calling
+        // out to a libcall when the deferred task's allocation was never
+        // forced.
+        if enters_sync_call {
             let exit_sync_call = self.module.import_exit_sync_call();
-            self.instruction(Call(exit_sync_call.as_u32()));
+            self.versioned_call(
+                &[FactVersionedIntrinsic::DeferredThreadIsCurrent],
+                FactVersionedIntrinsic::ExitSyncCallFast,
+                exit_sync_call,
+                &[],
+                &[],
+            );
         }
 
         // Like above during the translation of results the caller cannot be
@@ -827,6 +957,10 @@ impl<'a, 'b> Compiler<'a, 'b> {
 
         for tmp in temps {
             self.free_temp_local(tmp);
+        }
+
+        if self.region.is_some() {
+            self.end_region();
         }
 
         self.exit_exception_barrier();
@@ -936,6 +1070,13 @@ impl<'a, 'b> Compiler<'a, 'b> {
             Destination::Memory(self.malloc_abi(lift_opts, &abi, Trap::MemoryOutOfBounds))
         };
 
+        // When versioning, the flat arguments for the callee are written to
+        // locals as each is translated, rather than left on the operand stack,
+        // and are only pushed right before the call. That keeps the operand
+        // stack empty at the versioned transfer of any `borrow` parameter.
+        let spill_args = self.versioning && self.emit_resource_call;
+        let mut arg_locals = Vec::new();
+
         let srcs = src
             .record_field_srcs(self.types, src_tys.iter().copied())
             .zip(src_tys.iter());
@@ -944,6 +1085,18 @@ impl<'a, 'b> Compiler<'a, 'b> {
             .zip(dst_tys.iter());
         for ((src, src_ty), (dst, dst_ty)) in srcs.zip(dsts) {
             self.translate(&src_ty, &src, &dst_ty, &dst);
+            if let (true, Destination::Stack(tys, _)) = (spill_args, &dst) {
+                let start = arg_locals.len();
+                for ty in tys.iter().rev() {
+                    arg_locals.push(self.local_set_new_tmp(*ty));
+                }
+                arg_locals[start..].reverse();
+                self.operand_stack_empty = true;
+            }
+        }
+        for local in arg_locals {
+            self.local_get_tmp(&local);
+            self.free_temp_local(local);
         }
 
         // If the destination was linear memory instead of the stack then the
@@ -3555,11 +3708,61 @@ impl<'a, 'b> Compiler<'a, 'b> {
 
         if self.module.resource_owned_by_own_instance(dst_ty) {
             let transfer = self.module.import_resource_transfer_borrow_to_owner(src_ty);
-            self.translate_handle_types(src, &[], dst, transfer);
+            if self.versioning {
+                self.translate_borrow_to_owner_versioned(src_ty, src, dst, transfer);
+            } else {
+                self.translate_handle_types(src, &[], dst, transfer);
+            }
         } else {
             let transfer = self.module.import_resource_transfer_borrow();
             self.translate_handle(src_ty.as_u32(), src, Some(dst_ty.as_u32()), dst, transfer);
         }
+    }
+
+    /// Like `translate_handle_types` for the `transfer-borrow-to-owner`
+    /// intrinsic `transfer`, except that the transfer is a versioned call.
+    ///
+    /// The handle and the resulting `rep` go through locals, rather than the
+    /// operand stack, so that nothing is left on the operand stack at the
+    /// versioned call.
+    fn translate_borrow_to_owner_versioned(
+        &mut self,
+        src_ty: TypeResourceTableIndex,
+        src: &Source<'_>,
+        dst: &Destination,
+        transfer: FuncIndex,
+    ) {
+        use FactVersionedIntrinsic::*;
+
+        match src {
+            Source::Memory(mem) => self.i32_load(mem),
+            Source::Stack(stack) => self.stack_get(stack, ValType::I32),
+            Source::Struct(_) | Source::Array(_) => todo!("CM+GC"),
+        }
+        let handle = self.local_set_new_tmp(ValType::I32);
+        let rep = self.alloc_temp_local(ValType::I32);
+        self.versioned_call(
+            &[
+                DeferredThreadIsCurrent,
+                TransferBorrowToOwnerHasRoom,
+                TransferBorrowToOwnerInBounds { ty: src_ty },
+                TransferBorrowToOwnerIsResource { ty: src_ty },
+                TransferBorrowToOwnerHasType { ty: src_ty },
+            ],
+            TransferBorrowToOwnerFast { ty: src_ty },
+            transfer,
+            &[&handle],
+            &[&rep],
+        );
+        self.push_dst_addr(dst);
+        self.local_get_tmp(&rep);
+        match dst {
+            Destination::Memory(mem) => self.i32_store(mem),
+            Destination::Stack(stack, _) => self.stack_set(stack, ValType::I32),
+            Destination::Struct(_) | Destination::Array(_) => todo!("CM+GC"),
+        }
+        self.free_temp_local(rep);
+        self.free_temp_local(handle);
     }
 
     /// Translates the index `src`, which resides in the table `src_ty`, into
@@ -3897,10 +4100,19 @@ impl<'a, 'b> Compiler<'a, 'b> {
     }
 
     fn gen_temp_local(&mut self, ty: ValType, insn: fn(u32) -> Instruction<'static>) -> TempLocal {
+        let local = self.alloc_temp_local(ty);
+        self.instruction(insn(local.idx));
+        local
+    }
+
+    /// Allocates a new temporary local of type `ty` without initializing it.
+    ///
+    /// The returned `TempLocal` must be freed after it is finished with
+    /// `free_temp_local`.
+    fn alloc_temp_local(&mut self, ty: ValType) -> TempLocal {
         // First check to see if any locals are available in this function which
         // were previously generated but are no longer in use.
         if let Some(idx) = self.free_locals.get_mut(&ty).and_then(|v| v.pop()) {
-            self.instruction(insn(idx));
             return TempLocal {
                 ty,
                 idx,
@@ -3916,7 +4128,6 @@ impl<'a, 'b> Compiler<'a, 'b> {
         }
         self.nlocals += 1;
         let idx = self.nlocals - 1;
-        self.instruction(insn(idx));
         TempLocal {
             ty,
             idx,
@@ -3986,7 +4197,35 @@ impl<'a, 'b> Compiler<'a, 'b> {
     }
 
     fn instruction(&mut self, instr: Instruction) {
+        match &instr {
+            Block(_) | Loop(_) | If(_) | TryTable(..) => self.depth += 1,
+            End => {
+                self.depth = self
+                    .depth
+                    .checked_sub(1)
+                    .expect("`end` without a matching block");
+            }
+            Br(label) | BrIf(label) => self.assert_branch_within_region(*label),
+            BrTable(targets, default) => {
+                for label in targets.iter().chain([default]) {
+                    self.assert_branch_within_region(*label);
+                }
+            }
+            _ => {}
+        }
         instr.encode(&mut self.code);
+    }
+
+    /// Asserts that a branch to `label` emitted while a region is active
+    /// targets a block that was also opened inside the region, so that the
+    /// region's code can be spliced anywhere by its layout.
+    fn assert_branch_within_region(&self, label: u32) {
+        if let Some(region) = &self.region {
+            assert!(
+                label < self.depth - region.depth,
+                "branch out of a region being recorded"
+            );
+        }
     }
 
     fn trap(&mut self, trap: Trap) {
@@ -4031,16 +4270,21 @@ impl<'a, 'b> Compiler<'a, 'b> {
         if !self.module.features.exceptions() {
             return;
         }
-        let block_ty = match results.len() {
-            0 => BlockType::Empty,
-            1 => BlockType::Result(results[0]),
-            _ => BlockType::FunctionType(self.module.core_types.function(&[], results)),
-        };
+        let block_ty = self.block_type(results);
         // Outer block: carries the body's results past the handler.
         self.instruction(Block(block_ty));
         // Inner block: the landing pad targeted by the `catch_all` clause.
         self.instruction(Block(BlockType::Empty));
         self.instruction(TryTable(block_ty, vec![Catch::All { label: 0 }].into()));
+    }
+
+    /// The type of a block that takes no parameters and produces `results`.
+    fn block_type(&mut self, results: &[ValType]) -> BlockType {
+        match results.len() {
+            0 => BlockType::Empty,
+            1 => BlockType::Result(results[0]),
+            _ => BlockType::FunctionType(self.module.core_types.function(&[], results)),
+        }
     }
 
     /// Emits the epilogue of an exception barrier started with
@@ -4060,6 +4304,234 @@ impl<'a, 'b> Compiler<'a, 'b> {
         self.trap(Trap::UncaughtException);
         // End of the outer block; the body's results flow out.
         self.instruction(End);
+    }
+
+    /// Starts recording a region whose versioned points are laid out so that
+    /// the fast path never rejoins the slow path. `results` is the type of the
+    /// operand stack at the matching `end_region`.
+    ///
+    /// The operand stack must be empty when this is called, and code in the
+    /// region may only branch to labels that are also inside the region.
+    fn begin_region(&mut self, results: BlockType) {
+        assert!(self.region.is_none(), "regions do not nest");
+        self.flush_code();
+        self.operand_stack_empty = true;
+        self.region = Some(Region {
+            depth: self.depth,
+            results,
+            body_start: self.module.funcs[self.result].body.len(),
+            segments: Vec::new(),
+        });
+    }
+
+    /// Ends the region started by `begin_region`, laying out its trace.
+    ///
+    /// For a region with versioned points `0..n`, and with `S_k` the shared
+    /// code just before point `k` (and `S_n` the shared code after the last
+    /// point), this emits:
+    ///
+    /// ```wasm
+    /// S_0                       ;; already in place, emitted once
+    /// block (type results)      ;; join
+    ///   block                   ;; bail n-1
+    ///     ...
+    ///       block               ;; bail 0
+    ///         guard_0_0 i32.eqz br_if 0
+    ///         ...
+    ///         fast_0
+    ///         S_1
+    ///         guard_1_0 i32.eqz br_if 1
+    ///         ...
+    ///         fast_{n-1}
+    ///         S_n
+    ///         br n              ;; carry the results to the join
+    ///       end
+    ///       slow_0
+    ///       S_1                 ;; a copy
+    ///     end
+    ///     ...
+    ///   end
+    ///   slow_{n-1}
+    ///   S_n                     ;; a copy, falling through to the join
+    /// end
+    /// ```
+    ///
+    /// Once any guard fails, execution stays on the slow copy of the rest of
+    /// the region, so the code following each fast version only ever runs
+    /// after fast versions.
+    ///
+    /// A region without any versioned points leaves the function body exactly
+    /// as if the region had never begun.
+    fn end_region(&mut self) {
+        let mut region = self.region.take().expect("no region to end");
+        assert_eq!(self.depth, region.depth, "unbalanced region");
+        if region.segments.is_empty() {
+            return;
+        }
+        self.flush_code();
+        let body = &mut self.module.funcs[self.result].body;
+        let tail = body.drain(region.body_start..).collect();
+        region.segments.push(Segment::Shared(tail));
+
+        // The trace alternates between versioned points and the shared code
+        // following each of them.
+        let mut points = Vec::new();
+        let mut segments = region.segments.into_iter();
+        while let Some(point) = segments.next() {
+            let (Segment::Versioned(point), Some(Segment::Shared(shared))) =
+                (point, segments.next())
+            else {
+                unreachable!("a region's trace alternates between points and shared code")
+            };
+            points.push((point, shared));
+        }
+        let n = u32::try_from(points.len()).unwrap();
+
+        body.push(raw(&[Block(region.results)]));
+        for _ in 0..n {
+            body.push(raw(&[Block(BlockType::Empty)]));
+        }
+        let mut slow = Vec::new();
+        for (k, (point, shared)) in points.into_iter().enumerate() {
+            let k = u32::try_from(k).unwrap();
+            for guard in point.guards {
+                body.extend(guard);
+                body.push(raw(&[I32Eqz, BrIf(k)]));
+            }
+            body.extend(point.fast);
+            body.extend(shared.iter().cloned());
+            slow.push((point.slow, shared));
+        }
+        body.push(raw(&[Br(n), End]));
+        for (point_slow, shared) in slow {
+            body.extend(point_slow);
+            body.extend(shared);
+            body.push(raw(&[End]));
+        }
+    }
+
+    /// Runs `f` and returns the code it emits, rather than leaving that code
+    /// in the function body.
+    ///
+    /// The recorded code must have balanced control flow and must leave the
+    /// local free lists as it found them, except for locals that it allocated
+    /// itself.
+    fn record(&mut self, f: impl FnOnce(&mut Self)) -> Vec<Body> {
+        self.flush_code();
+        let start = self.module.funcs[self.result].body.len();
+        let depth = self.depth;
+        let nlocals = self.nlocals;
+        let free_locals = self.free_locals.clone();
+        f(self);
+        self.flush_code();
+        assert_eq!(self.depth, depth, "recorded code must be balanced");
+        let no_locals = Vec::new();
+        for ty in free_locals.keys().chain(self.free_locals.keys()) {
+            let before = free_locals.get(ty).unwrap_or(&no_locals);
+            let after = self.free_locals.get(ty).unwrap_or(&no_locals);
+            assert!(
+                before.iter().all(|l| after.contains(l)),
+                "recorded code must not hold onto a free local"
+            );
+            assert!(
+                after.iter().all(|l| before.contains(l) || *l >= nlocals),
+                "recorded code must not free a local it did not allocate"
+            );
+        }
+        self.module.funcs[self.result].body.drain(start..).collect()
+    }
+
+    /// Emits a call to the intrinsic `slow` that FACT has split into
+    /// `guards`, a fast path `fast`, and the slow path `slow`.
+    ///
+    /// `fast` and `slow` take the values of `args` as their parameters, and
+    /// each guard takes as many of the leading values of `args` as it has
+    /// parameters. `fast` and `slow` both return their results into
+    /// `results`, while each guard leaves its `i32` condition on the operand
+    /// stack.
+    ///
+    /// When versioning is disabled, this only emits the call to `slow`.
+    /// Otherwise, if this is at the top level of the region being recorded and
+    /// the operand stack is empty, this becomes one of the region's versioned
+    /// points. If not, this emits a diamond that branches to `fast` if every
+    /// guard passes and to `slow` if not, then rejoins.
+    fn versioned_call(
+        &mut self,
+        guards: &[FactVersionedIntrinsic],
+        fast: FactVersionedIntrinsic,
+        slow: FuncIndex,
+        args: &[&TempLocal],
+        results: &[&TempLocal],
+    ) {
+        debug_assert!(guards.iter().all(|g| g.is_guard()));
+        debug_assert!(!fast.is_guard());
+        debug_assert_eq!(fast.params().len(), args.len());
+        debug_assert!(guards.iter().all(|g| g.params().len() <= args.len()));
+        debug_assert!(guards.iter().all(|g| g.results().len() == 1));
+        debug_assert_eq!(fast.results().len(), results.len());
+
+        let call = |me: &mut Self, func: FuncIndex, args: &[&TempLocal], results: &[&TempLocal]| {
+            for arg in args {
+                me.local_get_tmp(arg);
+            }
+            me.instruction(Call(func.as_u32()));
+            // The last result is on the top of the operand stack.
+            for result in results.iter().rev() {
+                me.instruction(LocalSet(result.idx));
+            }
+        };
+
+        if !self.versioning {
+            call(self, slow, args, results);
+            return;
+        }
+
+        let in_region = self.operand_stack_empty
+            && self
+                .region
+                .as_ref()
+                .is_some_and(|region| region.depth == self.depth);
+
+        // End the region's current shared segment. The region's first point
+        // leaves the code before it in place, never to be duplicated.
+        self.flush_code();
+        if in_region {
+            let region = self.region.as_mut().unwrap();
+            if !region.segments.is_empty() {
+                let shared = self.module.funcs[self.result]
+                    .body
+                    .drain(region.body_start..)
+                    .collect();
+                region.segments.push(Segment::Shared(shared));
+            }
+        }
+
+        let point = Versioned {
+            guards: guards
+                .iter()
+                .map(|guard| {
+                    self.record(|me| {
+                        let args = &args[..guard.params().len()];
+                        let guard = me.module.import_fact_versioned(*guard);
+                        call(me, guard, args, &[])
+                    })
+                })
+                .collect(),
+            fast: self.record(|me| {
+                let fast = me.module.import_fact_versioned(fast);
+                call(me, fast, args, results)
+            }),
+            slow: self.record(|me| call(me, slow, args, results)),
+        };
+
+        let body = &mut self.module.funcs[self.result].body;
+        if in_region {
+            let region = self.region.as_mut().unwrap();
+            region.segments.push(Segment::Versioned(point));
+            region.body_start = body.len();
+        } else {
+            point.diamond(body);
+        }
     }
 
     /// Pushes a `Body` fragment directly to the function being created.
@@ -4082,9 +4554,14 @@ impl<'a, 'b> Compiler<'a, 'b> {
     }
 
     fn finish(mut self) {
+        assert_eq!(self.depth, 0, "unbalanced control flow");
+        assert!(self.region.is_none(), "unfinished region");
+
         // Append the final `end` instruction which all functions require, and
-        // then empty out the temporary buffer in `Compiler`.
-        self.instruction(End);
+        // then empty out the temporary buffer in `Compiler`. Note that this
+        // ends the function body rather than a block, and so it bypasses the
+        // depth tracking in `instruction`.
+        End.encode(&mut self.code);
         self.flush_code();
 
         // Flag the function as "done" which helps with an assert later on in
@@ -4161,6 +4638,7 @@ impl<'a, 'b> Compiler<'a, 'b> {
     /// list is known to be of length 1.
     fn stack_set(&mut self, dst_tys: &[ValType], src_ty: ValType) {
         assert_eq!(dst_tys.len(), 1);
+        self.operand_stack_empty = false;
         let dst_ty = dst_tys[0];
         match (src_ty, dst_ty) {
             (ValType::I32, ValType::I32)
