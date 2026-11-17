@@ -5,6 +5,7 @@
 ;;!    -O memory-may-move=n
 ;;!    -O gc-heap-reservation=131071
 ;;!    -O gc-heap-may-move=n
+;;!    -O gc-heap-initial-size=0
 ;;!    -O pooling-max-memory-size=131071
 ;;! """
 
